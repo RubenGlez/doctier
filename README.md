@@ -1,6 +1,6 @@
 # doctier
 
-**Tiered privacy and lifecycle for generated documents, over git.** Harness-agnostic.
+**Tiered privacy and lifecycle for generated documents, over git.** Works with any coding agent or workflow.
 
 `doctier` is a single static Go binary that classifies the documents a project
 generates along **two independent axes** and enforces that classification
@@ -42,9 +42,9 @@ or shared), committing docs to a working branch and deleting them by hand later
 `doctier` builds the **two missing axes on top of git** instead of inventing a new
 store, and it was designed from the start for **coding agents working in parallel
 git worktrees**. Because tracked docs — public *and* private (encrypted) — travel
-to every worktree through git's own checkout, there is no "seed the worktree" hook
-to maintain: an agent spawned in a fresh worktree sees exactly the docs it should,
-with private ones already decrypted in its working tree.
+to every worktree through git's own checkout, an agent spawned in a fresh worktree
+sees exactly the docs it should, with private ones already decrypted in its working
+tree, and nothing extra to set up per worktree.
 
 ## How it works
 
