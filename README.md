@@ -166,6 +166,22 @@ If you `git add` `docs/strategy/roadmap.md` without the filter applied, or stage
 `_scratch/notes.md`, the `pre-commit` hook (`doctier check --staged`) blocks the
 commit. Preview a cleanup without touching anything with `doctier gc --dry-run`.
 
+## Agent skill
+
+doctier ships an agent skill, `doctier-setup`, that classifies your generated docs
+interactively: it scans the repo, asks how you treat specs, and writes
+`.doctier.yml` for you — only asking about the exceptions (what's private, what's
+ephemeral); everything else stays at the `public` + `durable` default. Install it
+into your coding agent via [skills.sh](https://www.skills.sh):
+
+```bash
+npx skills add RubenGlez/doctier
+```
+
+The skill deliberately carries no opinions in the binary: the classification hints
+(a snapshot of spec-driven-development conventions) live as editable data in the
+skill, so they can be refreshed without a doctier release.
+
 ## Fail-closed guarantees
 
 `doctier check` (wired as a pre-commit hook and run in CI) refuses the commit if:
