@@ -16,7 +16,8 @@ fail-closed, to let a private doc be committed in cleartext.
 
 > Status: **prototype**. The core — manifest, age clean/smudge filters, fail-closed
 > checks, ephemeral GC — works end-to-end. See [`docs/DESIGN.md`](docs/DESIGN.md)
-> for the full design and the decisions behind it.
+> for the full design and the decisions behind it, and [`docs/STRATEGY.md`](docs/STRATEGY.md)
+> for the value proposition, competitive landscape and roadmap.
 
 ## Why it exists
 
