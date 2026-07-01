@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"text/tabwriter"
-	"os"
 
 	"github.com/rubenglez/doctier/internal/config"
 	"github.com/rubenglez/doctier/internal/gitx"
