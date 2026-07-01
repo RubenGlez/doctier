@@ -86,6 +86,7 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 | `doctier init` | Scaffold `.doctier.yml`, `.gitattributes`, `.gitignore`, hooks and the clean/smudge filter. |
 | `doctier check [--staged]` | Fail-closed policy check (for pre-commit/pre-push and CI). |
 | `doctier status` | Show the effective classification of each document. |
+| `doctier agents [--write]` | Emit a tier-aware context block for `AGENTS.md` / `CLAUDE.md` (print, or `--write` to maintain a managed block). |
 | `doctier gc [--trigger ttl\|worktree\|pr-merge\|all]` | Collect expired ephemerals. |
 | `doctier grant "<ssh-pubkey>"` | Add a recipient and re-encrypt private docs. |
 | `doctier filter clean\|smudge <file>` | Git filter (invoked by git, not by hand). |
