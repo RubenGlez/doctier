@@ -178,7 +178,10 @@ commit. Preview a cleanup without touching anything with `doctier gc --dry-run`.
 clean/smudge filter lives in `.git/config` and the hooks in `.git/hooks`; neither
 travels with the repo, so a fresh clone has no local protection until it runs
 `doctier init`. CI inspects the committed blobs directly (filter installed or not),
-so it is what makes the guarantee hold for every contributor.
+so it is what makes the guarantee hold for every contributor. CI also drives the
+`pr-merge` collection. Copy-paste recipes for [GitHub Actions](docs/ci/github-actions.yml)
+and [GitLab CI](docs/ci/gitlab-ci.yml); neither needs your age key (check and gc
+never decrypt).
 
 ## Known limitations (prototype)
 

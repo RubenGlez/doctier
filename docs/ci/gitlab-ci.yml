@@ -1,0 +1,39 @@
+# doctier on GitLab CI.
+#
+# Merge into your .gitlab-ci.yml. Two jobs:
+#   doctier-check — fail-closed policy check on every merge request (runs on the
+#                   committed blobs; no age key needed since it never decrypts).
+#   doctier-gc    — collect pr-merge ephemerals once a merge lands on the default
+#                   branch, then commit the deletions back.
+#
+# Pushing back from CI needs a token with write access. Create a Project Access
+# Token (scope: write_repository) and expose it as the CI variable DOCTIER_PUSH_TOKEN.
+
+doctier-check:
+  image: golang:1-alpine
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  before_script:
+    - apk add --no-cache git
+    - go install github.com/rubenglez/doctier@latest
+  script:
+    - doctier check
+
+doctier-gc:
+  image: golang:1-alpine
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  before_script:
+    - apk add --no-cache git
+    - go install github.com/rubenglez/doctier@latest
+  script:
+    # Ensure HEAD is the integration branch: pr-merge collection only runs there.
+    - git checkout "$CI_DEFAULT_BRANCH"
+    - doctier gc --trigger pr-merge
+    - |
+      if ! git diff --cached --quiet; then
+        git config user.name "doctier-bot"
+        git config user.email "doctier@example.com"
+        git commit -m "chore(doctier): collect pr-merge ephemerals [skip ci]"
+        git push "https://oauth2:${DOCTIER_PUSH_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git" "HEAD:${CI_DEFAULT_BRANCH}"
+      fi

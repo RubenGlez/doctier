@@ -361,10 +361,10 @@ Ninguna decisión de diseño queda abierta; lo que resta es detalle de construcc
 - **Nombre definitivo** de la CLI (`doctier` es nombre de trabajo).
 - **Ceremonia de claves `age`**: rotación de la clave de datos al revocar, custodia y flujo de
   altas/bajas concreto sobre el recipients file.
-- **Recetas de CI por host** para `doctier gc` en el evento de merge (GitHub Actions, GitLab CI,
-  etc.), más el heurístico del hook local de refuerzo.
 - **Detalle del hook local de `pr-merge`**: cómo decidir "esta rama ya está fusionada/desaparecida"
-  de forma robusta (squash merges, ramas remotas borradas).
+  de forma robusta (squash merges, ramas remotas borradas). La recolección por CI ya está resuelta
+  con el gating por rama de integración; hay recetas de ejemplo en [`ci/`](ci/) (GitHub Actions,
+  GitLab CI).
 
 ---
 

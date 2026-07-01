@@ -1,0 +1,52 @@
+# doctier on GitHub Actions.
+#
+# Copy to .github/workflows/doctier.yml in your repo. Two jobs:
+#   check — fail-closed policy check on every pull request (the only
+#           host-independent guarantee; runs on the committed blobs, no age key
+#           needed since it never decrypts).
+#   gc    — collect pr-merge ephemerals after a merge lands on the default
+#           branch, then commit the deletions back.
+#
+# Pin @latest to a tag once you depend on this in earnest.
+
+name: doctier
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: stable }
+      - run: go install github.com/rubenglez/doctier@latest
+      - run: doctier check
+
+  gc:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Check out the branch itself (not a detached HEAD): pr-merge collection
+      # only runs when HEAD is the integration branch.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with: { go-version: stable }
+      - run: go install github.com/rubenglez/doctier@latest
+      - name: Collect pr-merge ephemerals
+        run: |
+          doctier gc --trigger pr-merge
+          if ! git diff --cached --quiet; then
+            git config user.name "doctier-bot"
+            git config user.email "doctier@users.noreply.github.com"
+            git commit -m "chore(doctier): collect pr-merge ephemerals [skip ci]"
+            git push
+          fi
