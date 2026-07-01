@@ -192,8 +192,9 @@ never decrypt).
 - The `pr-merge` trigger is host-specific to detect reliably; `doctier gc` is the
   generic command — wire it from CI (primary), a local hook (reinforcement) and
   rely on `ttl` as the safety net.
-- Only age encryption is implemented; the separate-private-repo option from the
-  design is not built.
+
+Encryption is age-only by design (a separate private-repo backend is an explicit
+non-goal — see [`docs/STRATEGY.md`](docs/STRATEGY.md) §4).
 
 ## License
 

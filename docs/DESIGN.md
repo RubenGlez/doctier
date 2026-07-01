@@ -47,8 +47,11 @@ encima de git**, sin depender de ningún arnés.
 
 **No-objetivos**
 - No es un gestor documental ni un wiki. Solo clasifica y aplica políticas.
+- No es una herramienta de colaboración/comentarios (STRATEGY.md §5); eso diluiría el foco.
 - No sustituye el control de acceso del host para lo público; lo complementa.
 - No garantiza ocultar la *existencia* del contenido privado, solo su lectura (ver §6, metadatos).
+- No soporta backend de cifrado alternativo (repo privado separado): descartado por romper los
+  diferenciadores (§6, STRATEGY.md §4).
 
 ## 3. Modelo: dos ejes independientes
 
@@ -126,7 +129,7 @@ docs:
 
 # Configuración (claves de nivel superior; nombradas para no colisionar con los
 # ejes por-regla 'visibility' y 'lifetime')
-recipients_file: .doctier/recipients.txt   # quién lee lo privado (grant/revoke)
+recipients_file: .doctier/recipients.txt   # quién lee lo privado (gestionado con grant)
 
 # ephemeral: integration_branch es dónde se recolectan los efímeros pr-merge;
 # omítelo para autodetectar (origin/HEAD, si no main/master).
@@ -155,23 +158,24 @@ cambia qué hace `doctier` con ellos.
 | private | ephemeral (no sensible) | Rastreado cifrado; disparador hace `git rm` + commit al expirar (el ciphertext queda en historia). |
 | cualquiera | ephemeral + `sensitive: true` | **Nunca rastreado**: gitignored + almacenado local al worktree; se borra del disco al expirar. Sin rastro en historia. |
 
-## 6. Nivel privado: backend (decisión: age por defecto, enchufable)
+## 6. Nivel privado: cifrado con age
 
 El contenido privado se persiste y comparte con autorizados pero nunca se lee en claro desde el
-repo. El mecanismo de cifrado se diseñó **enchufable**, con **`age`** como opción por defecto.
-Comparación de las dos opciones viables:
+repo. El mecanismo es **`age`, cifrado in-situ**. Se evaluaron dos opciones; abajo la comparación y
+por qué la otra quedó como no-objetivo.
 
-> **Prototipo:** el manifiesto **no expone hoy un selector de backend** (solo `age`); se quitó por
-> YAGNI y se reintroduciría al construir un segundo mecanismo. La comparación de abajo documenta la
-> decisión de diseño, no una opción configurable actual.
+> **Decisión:** `age` es el único mecanismo. El manifiesto **no expone selector de backend** — un
+> repo privado separado (Opción B) se descartó por chocar con los diferenciadores de `doctier`
+> (ver más abajo y STRATEGY.md §4).
 
 ### Opción A — Cifrado in-situ (age) · POR DEFECTO
 
 Mismo repo, filtro `clean/smudge` + `.gitattributes`: el blob guardado es ciphertext; el filtro
 `smudge` descifra en cada checkout (y por tanto en cada worktree). Claves gestionadas como
 recipients de `age`, **reutilizando las claves SSH** que la gente ya tiene (age las soporta), sin
-ceremonia de claves nuevas. `doctier grant/revoke` añade/quita una clave del recipients file y
-**re-cifra** los ficheros afectados; revocar = quitar la clave + re-cifrar.
+ceremonia de claves nuevas. `doctier grant` añade una clave al recipients file y **re-cifra** los
+ficheros afectados; revocar = quitar la línea del recipients file + re-ejecutar `grant` (re-cifra al
+set actual). No hay comando `revoke` aparte.
 
 - **Pros**: un solo repo, mínima fricción; agnóstico del host (sirve hasta en repo público);
   historia atómica junto al código; **compatibilidad nativa con worktrees** (viaja por checkout,
@@ -183,10 +187,10 @@ ceremonia de claves nuevas. `doctier grant/revoke` añade/quita una clave del re
 - `age` sobre `git-crypt`: claves modernas y multi-recipient más simples; `git-crypt` está atado
   a GPG y con mantenimiento escaso.
 
-### Opción B — Repo privado separado (enchufable, no por defecto)
+### Opción B — Repo privado separado (considerada y descartada como no-objetivo)
 
-La estrategia vive en su propio repo git privado, mantenido como **repo hermano sincronizado por
-`doctier`** (mejor que submódulo, que sufre con worktrees).
+Alternativa evaluada: la estrategia vive en su propio repo git privado, mantenido como repo hermano
+sincronizado por `doctier`.
 
 - **Pros**: separación real, cero fuga de contenido y metadatos al repo público; acceso nativo
   del host y **revocable**; texto plano dentro del repo privado (diff/merge/blame normales); sin
@@ -194,13 +198,18 @@ La estrategia vive en su propio repo git privado, mantenido como **repo hermano 
 - **Contras**: dos repos que sincronizar; **fricción con worktrees** (hay que resolver el repo
   hermano por worktree); cuesta mantener atómico "código + cambio de estrategia".
 
-### Por qué age por defecto
+**Descartada como no-objetivo (ver STRATEGY.md §4).** Un repo separado no es *tracked-encrypted
+in-place*, así que **rompe los dos diferenciadores defendibles** de `doctier`: decrypt-into-context
+(el agente lee en claro localmente mientras git guarda cifrado) y worktree-native por tracked-
+encrypted (el privado viaja solo por checkout, sin sembrado). Mantenerla como "backend enchufable"
+diluye el foco; por eso el manifiesto **no expone selector de backend**. Si en el futuro hace falta
+aislamiento duro o revocación real vía host, se reevaluaría entonces.
+
+### Por qué age
 
 El caso principal es un repo de equipo (privado) donde el objetivo es que *no todo el que tiene
 acceso lea la estrategia* y que *no se filtre a forks/mirrors*. Ahí `age` gana: menos fricción,
-un repo, y —decisivo aquí— **compatibilidad nativa con worktrees**. La Opción B queda documentada
-y enchufable para quien necesite aislamiento duro o acceso revocable (típicamente, repo principal
-público). La decisión no queda congelada: se cambia en el manifiesto.
+un repo, y —decisivo aquí— **compatibilidad nativa con worktrees**.
 
 ## 7. Duración efímera: disparadores, alcance y borrado
 
@@ -287,12 +296,16 @@ con `doctier init`. No arrastra copias de scripts por proyecto.
 
 | Comando | Qué hace |
 |---|---|
-| `doctier init` | Crea `.doctier.yml`, entradas de `.gitattributes`, instala hooks, genera clave `age`. |
-| `doctier check` | Verifica que todo doc casa una regla; que ningún privado está en claro; que ningún sensible está staged. Para pre-commit/pre-push y CI. |
-| `doctier gc` | Purga efímeros expirados (pr-merge/worktree/ttl). |
-| `doctier grant/revoke <id>` | Gestiona acceso privado (recipients de age / permisos del repo separado). |
-| `doctier reveal/hide` | Descifra/cifra en local para editar (backend de cifrado). |
+| `doctier init` | Scaffolding: `.doctier.yml`, entradas de `.gitattributes`/`.gitignore`, hooks y el filtro clean/smudge. |
+| `doctier check [--staged]` | Fail-closed: ningún privado en claro, ningún sensible staged, y (opt-in) ningún doc sin clasificar. Para pre-commit/pre-push y CI. |
 | `doctier status` | Muestra la clasificación efectiva de cada doc y su expiración. |
+| `doctier agents [--write]` | Emite un bloque tier-aware de contexto para `AGENTS.md`/`CLAUDE.md`. |
+| `doctier gc [--trigger T]` | Purga efímeros expirados (`ttl`/`worktree`/`pr-merge`/`all`). |
+| `doctier grant "<ssh-pubkey>"` | Añade un recipient y re-cifra los privados. Para **revocar**: quita la línea del recipients file y re-ejecuta `grant` (re-cifra al set actual). |
+| `doctier filter clean\|smudge <f>` | Filtro de git (lo invoca git, no una persona). |
+
+> Comandos `reveal`/`hide` (descifrar/cifrar en local para editar) se contemplaron pero **no están
+> implementados**: con el filtro smudge el working tree ya está en claro, así que no han hecho falta.
 
 ## 10. Redes de seguridad (fail-closed)
 
@@ -335,20 +348,22 @@ después.
 
 ## 13. Decisiones tomadas
 
-1. **Backend privado**: `age` por defecto, **enchufable** (repo separado como alternativa). §6.
+1. **Cifrado privado**: **`age` in-situ, único mecanismo** (sin selector de backend). El repo
+   privado separado se descartó como no-objetivo por romper los diferenciadores. §6.
 2. **Clasificación dirigida por el usuario**: un `.doctier.yml` donde el usuario decide
    visibilidad, duración, disparador y TTL por patrón. La herramienta no opina sobre ficheros
    concretos. §4.
 3. **Modelo de dos ejes independientes**: visibilidad (public/private) × duración
    (durable/ephemeral). §3.
-4. **Alcance del efímero**: configurable (`worktree|branch`), **worktree por defecto**. §7.2.
+4. **Alcance del efímero**: solo `worktree` (local, exige `sensitive`); `branch` diseñado pero no
+   implementado, sin selector `default_scope` en el manifiesto. §7.2.
 5. **Distribución**: **CLI standalone en su propio repo** (fuera del arnés). §9.
 6. **Efímero = vida finita, no gitignored**; borrado normal para lo no sensible, y **solo local
    (nunca commiteado) para lo sensible**, para no dejar rastro en la historia. §7.
 7. **Ecosistema**: **Go**, binario único estático (sin runtime, arranque instantáneo en los
    filtros clean/smudge, distribución trivial). §9.
 8. **Claves `age`**: **reutilizar las claves SSH** existentes como recipients (age las soporta);
-   `doctier grant/revoke` añade/quita una clave y re-cifra los ficheros afectados. §6.
+   `doctier grant` añade una clave y re-cifra (revocar = quitar la línea y re-ejecutar `grant`). §6.
 9. **Disparador `pr-merge`**: comando genérico `doctier gc` invocado desde **CI (primario)** en
    el evento de merge, con **refuerzo por hook local** y **TTL como red final**. §7.1.
 10. **Manifiesto**: **YAML**, con precedencia **"primera regla que casa"** (orden explícito
