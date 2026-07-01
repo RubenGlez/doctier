@@ -10,6 +10,10 @@ import (
 	"github.com/rubenglez/doctier/internal/gitx"
 )
 
+// Version is the CLI version, overridden at build time via -ldflags by the
+// release pipeline. It stays "dev" for local `go build` / `go install` builds.
+var Version = "dev"
+
 const usage = `doctier — tiered privacy and lifecycle for generated docs, over git.
 
 Usage:
@@ -23,6 +27,7 @@ Commands:
   gc [--trigger T]         Collect expired ephemeral docs (ttl|worktree|pr-merge|all)
   grant <ssh-pubkey>       Add a recipient and re-encrypt private docs
   filter clean|smudge <f>  Git clean/smudge filter (invoked by git, not by hand)
+  version                  Print the doctier version
 
 Run "doctier <command> -h" for command flags.
 `
@@ -49,6 +54,9 @@ func Execute(args []string) int {
 		err = runGrant(args[1:])
 	case "filter":
 		err = runFilter(args[1:])
+	case "version", "--version", "-v":
+		fmt.Printf("doctier %s\n", Version)
+		return 0
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return 0

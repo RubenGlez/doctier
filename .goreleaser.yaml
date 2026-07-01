@@ -1,0 +1,63 @@
+# GoReleaser config — cross-compiled binaries, checksums, and a Homebrew
+# formula, all published to GitHub Releases on a `v*` tag.
+# Docs: https://goreleaser.com
+version: 2
+
+project_name: doctier
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/rubenglez/doctier/cmd.Version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "checksums.txt"
+
+# Homebrew cask, committed to the Casks/ directory of this same repo (so the
+# repo doubles as its own tap — no separate homebrew-tap repo). Casks are the
+# current way to distribute prebuilt binaries via Homebrew; `brews` (formulas
+# from binaries) is deprecated. Uses the release GITHUB_TOKEN to push here.
+homebrew_casks:
+  - repository:
+      owner: RubenGlez
+      name: doctier
+    binaries:
+      - doctier
+    homepage: "https://github.com/RubenGlez/doctier"
+    description: "Tiered privacy and lifecycle for generated documents, over git."
+    commit_author:
+      name: goreleaser
+      email: goreleaser@users.noreply.github.com
+    # Don't publish the cask for pre-release tags (e.g. v1.0.0-rc1).
+    skip_upload: auto
+
+release:
+  draft: false
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

@@ -1,3 +1,4 @@
 /doctier
 /doctier-bin
 *.test
+/dist/

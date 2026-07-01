@@ -91,10 +91,27 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 | `doctier grant "<ssh-pubkey>"` | Add a recipient and re-encrypt private docs. |
 | `doctier filter clean\|smudge <file>` | Git filter (invoked by git, not by hand). |
 
+## Install
+
+No Go toolchain required — pick one:
+
+```bash
+# Homebrew (this repo doubles as its own tap)
+brew tap RubenGlez/doctier https://github.com/RubenGlez/doctier
+brew install doctier
+
+# Install script (Linux/macOS): downloads the right prebuilt binary
+curl -fsSL https://raw.githubusercontent.com/RubenGlez/doctier/main/install.sh | sh
+
+# Or grab a binary from https://github.com/RubenGlez/doctier/releases
+
+# With Go installed
+go install github.com/rubenglez/doctier@latest
+```
+
 ## Quick start
 
 ```bash
-go build -o doctier .          # or: go install github.com/rubenglez/doctier@latest
 cd your-repo
 doctier init
 doctier grant "$(cat ~/.ssh/id_ed25519.pub)"
