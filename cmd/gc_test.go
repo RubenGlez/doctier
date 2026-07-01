@@ -1,0 +1,84 @@
+package cmd
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestGCPRMergeBranchGating(t *testing.T) {
+	root := initRepo(t, `version: 1
+docs:
+  - path: "**/*.prd.md"
+    visibility: public
+    lifetime: ephemeral
+    expire: { on: pr-merge }
+`)
+	write(t, root, "f.prd.md", "prd\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "init")
+
+	// On a feature branch, pr-merge collection must be a no-op.
+	git(t, root, "switch", "-c", "feature", "-q")
+	if err := runGC([]string{"--trigger", "pr-merge"}); err != nil {
+		t.Fatalf("gc on feature branch: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "f.prd.md")); err != nil {
+		t.Fatal("prd must survive on a feature branch")
+	}
+
+	// On the integration branch, it must be collected.
+	git(t, root, "switch", "main", "-q")
+	if err := runGC([]string{"--trigger", "pr-merge"}); err != nil {
+		t.Fatalf("gc on main: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "f.prd.md")); !os.IsNotExist(err) {
+		t.Fatalf("prd must be collected on the integration branch, stat err=%v", err)
+	}
+}
+
+func TestGCTTLUsesCommitDateNotMtime(t *testing.T) {
+	root := initRepo(t, `version: 1
+docs:
+  - path: "r.md"
+    visibility: public
+    lifetime: ephemeral
+    expire: { on: ttl, ttl_days: 30 }
+`)
+	write(t, root, "r.md", "old report\n")
+	git(t, root, "add", "-A")
+	// Commit 60 days ago, but leave a fresh mtime — the clone/checkout scenario.
+	old := time.Now().AddDate(0, 0, -60).Format(time.RFC3339)
+	gitEnv(t, root, []string{"GIT_AUTHOR_DATE=" + old, "GIT_COMMITTER_DATE=" + old}, "commit", "-qm", "old")
+	now := time.Now()
+	if err := os.Chtimes(filepath.Join(root, "r.md"), now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runGC([]string{"--trigger", "ttl"}); err != nil {
+		t.Fatalf("gc ttl: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "r.md")); !os.IsNotExist(err) {
+		t.Fatal("ttl must collect by commit date (60d old) despite a fresh mtime")
+	}
+}
+
+func TestGCTTLKeepsFreshDoc(t *testing.T) {
+	root := initRepo(t, `version: 1
+docs:
+  - path: "r.md"
+    visibility: public
+    lifetime: ephemeral
+    expire: { on: ttl, ttl_days: 30 }
+`)
+	write(t, root, "r.md", "fresh\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "fresh")
+	if err := runGC([]string{"--trigger", "ttl"}); err != nil {
+		t.Fatalf("gc ttl: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "r.md")); err != nil {
+		t.Fatal("a recently committed doc must not be collected")
+	}
+}

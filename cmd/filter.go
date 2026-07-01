@@ -32,34 +32,36 @@ func runFilter(args []string) error {
 		return err
 	}
 
-	// Not private-tracked → passthrough.
-	if !ok || !rule.Encrypted() {
-		_, err = os.Stdout.Write(input)
-		return err
-	}
-
-	switch mode {
-	case "clean":
-		return clean(m, root, file, input)
-	case "smudge":
-		return smudge(input)
+	var out []byte
+	switch {
+	case !ok || !rule.Encrypted():
+		// Not private-tracked → passthrough.
+		out = input
+	case mode == "clean":
+		out, err = clean(m, root, file, input)
+	case mode == "smudge":
+		out, err = smudge(input)
 	default:
 		return fmt.Errorf("filter: unknown mode %q", mode)
 	}
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(out)
+	return err
 }
 
-func clean(m *config.Manifest, root, file string, plaintext []byte) error {
+func clean(m *config.Manifest, root, file string, plaintext []byte) ([]byte, error) {
 	// Guard against double-encryption: if the input is already age ciphertext
 	// (e.g. a keyless checkout left ciphertext in the working tree via the
 	// fail-open smudge, and the file is being re-added), pass it through
 	// unchanged instead of encrypting it again and corrupting it.
 	if agex.IsEncrypted(plaintext) {
-		_, err := os.Stdout.Write(plaintext)
-		return err
+		return plaintext, nil
 	}
 	recipients, err := agex.LoadRecipients(recipientsPath(m, root))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Idempotency: age encryption is randomized, so re-encrypting identical
 	// plaintext would churn the blob on every add. If the already-staged
@@ -68,36 +70,26 @@ func clean(m *config.Manifest, root, file string, plaintext []byte) error {
 	// changes and files must actually be re-encrypted.
 	if os.Getenv("DOCTIER_FORCE_ENCRYPT") == "" {
 		if existing := reuseCiphertext(file, plaintext); existing != nil {
-			_, err = os.Stdout.Write(existing)
-			return err
+			return existing, nil
 		}
 	}
-	ct, err := agex.Encrypt(plaintext, recipients)
-	if err != nil {
-		return err
-	}
-	_, err = os.Stdout.Write(ct)
-	return err
+	return agex.Encrypt(plaintext, recipients)
 }
 
-func smudge(ciphertext []byte) error {
+func smudge(ciphertext []byte) ([]byte, error) {
 	if !agex.IsEncrypted(ciphertext) {
 		// Never encrypted (e.g. added before the filter was configured).
-		_, err := os.Stdout.Write(ciphertext)
-		return err
+		return ciphertext, nil
 	}
 	id, err := agex.LoadIdentity("")
 	if err != nil {
 		// No key on this machine: emit ciphertext so the file stays unreadable
 		// rather than failing the checkout.
-		_, werr := os.Stdout.Write(ciphertext)
-		return werr
+		return ciphertext, nil
 	}
 	pt, err := agex.Decrypt(ciphertext, id)
 	if err != nil {
-		_, werr := os.Stdout.Write(ciphertext)
-		return werr
+		return ciphertext, nil
 	}
-	_, err = os.Stdout.Write(pt)
-	return err
+	return pt, nil
 }
