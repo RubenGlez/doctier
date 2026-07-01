@@ -1,0 +1,146 @@
+// Package agex wraps age encryption using SSH keys as recipients/identities.
+//
+// Recipients are reused SSH public keys (age supports ssh-ed25519 and ssh-rsa),
+// so there is no separate key ceremony. Ciphertext is ASCII-armored so it is
+// easy to detect in git and degrades gracefully in diffs.
+package agex
+
+import (
+	"bufio"
+	"bytes"
+	"crypto/ed25519"
+	"crypto/rsa"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"filippo.io/age"
+	"filippo.io/age/agessh"
+	"filippo.io/age/armor"
+	"golang.org/x/crypto/ssh"
+)
+
+// ArmorHeader is the first line of an armored age file.
+const ArmorHeader = "-----BEGIN AGE ENCRYPTED FILE-----"
+
+// IsEncrypted reports whether data looks like armored age ciphertext.
+func IsEncrypted(data []byte) bool {
+	return bytes.HasPrefix(bytes.TrimLeft(data, " \t\r\n"), []byte(ArmorHeader))
+}
+
+// LoadRecipients parses an SSH-public-key-per-line recipients file. Blank lines
+// and lines starting with '#' are ignored.
+func LoadRecipients(path string) ([]age.Recipient, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open recipients: %w", err)
+	}
+	defer f.Close()
+
+	var recipients []age.Recipient
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		r, err := agessh.ParseRecipient(line)
+		if err != nil {
+			return nil, fmt.Errorf("parse recipient %q: %w", line, err)
+		}
+		recipients = append(recipients, r)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if len(recipients) == 0 {
+		return nil, fmt.Errorf("no recipients found in %s", path)
+	}
+	return recipients, nil
+}
+
+// LoadIdentity loads an SSH private key as an age identity for decryption.
+// If keyPath is empty it tries $DOCTIER_SSH_KEY, then the usual default keys.
+func LoadIdentity(keyPath string) (age.Identity, error) {
+	if keyPath == "" {
+		keyPath = os.Getenv("DOCTIER_SSH_KEY")
+	}
+	candidates := []string{keyPath}
+	if keyPath == "" {
+		home, _ := os.UserHomeDir()
+		candidates = []string{
+			filepath.Join(home, ".ssh", "id_ed25519"),
+			filepath.Join(home, ".ssh", "id_rsa"),
+		}
+	}
+	var lastErr error
+	for _, p := range candidates {
+		if p == "" {
+			continue
+		}
+		pem, err := os.ReadFile(p)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		id, err := identityFromPEM(pem)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return id, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no SSH private key found")
+	}
+	return nil, lastErr
+}
+
+func identityFromPEM(pem []byte) (age.Identity, error) {
+	k, err := ssh.ParseRawPrivateKey(pem)
+	if err != nil {
+		return nil, fmt.Errorf("parse ssh key: %w", err)
+	}
+	switch key := k.(type) {
+	case *ed25519.PrivateKey:
+		return agessh.NewEd25519Identity(*key)
+	case ed25519.PrivateKey:
+		return agessh.NewEd25519Identity(key)
+	case *rsa.PrivateKey:
+		return agessh.NewRSAIdentity(key)
+	default:
+		return nil, fmt.Errorf("unsupported ssh key type %T (use ed25519 or rsa)", k)
+	}
+}
+
+// Encrypt returns armored age ciphertext of plaintext for the given recipients.
+func Encrypt(plaintext []byte, recipients []age.Recipient) ([]byte, error) {
+	var out bytes.Buffer
+	armorW := armor.NewWriter(&out)
+	w, err := age.Encrypt(armorW, recipients...)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(plaintext); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	if err := armorW.Close(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// Decrypt returns the plaintext of armored age ciphertext using identity.
+func Decrypt(ciphertext []byte, identity age.Identity) ([]byte, error) {
+	armorR := armor.NewReader(bytes.NewReader(ciphertext))
+	r, err := age.Decrypt(armorR, identity)
+	if err != nil {
+		return nil, err
+	}
+	return io.ReadAll(r)
+}
