@@ -78,6 +78,7 @@ func TestValidate(t *testing.T) {
 		{"ttl without days", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "ttl"}}}}, "ttl_days > 0"},
 		{"worktree without sensitive", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "ephemeral", Expire: &Expire{On: "worktree"}}}}, "requires sensitive"},
 		{"sensitive on durable", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "durable", Sensitive: true}}}, "sensitive is only valid"},
+		{"sensitive pr-merge", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "ephemeral", Sensitive: true, Expire: &Expire{On: "pr-merge"}}}}, "not pr-merge"},
 		{"unreachable rule", &Manifest{Docs: []Rule{
 			{Path: "docs/**", Visibility: "public", Lifetime: "durable"},
 			{Path: "docs/strategy/**", Visibility: "private", Lifetime: "durable"},
@@ -97,6 +98,18 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", c.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestSensitiveDefaultsExpireToWorktree(t *testing.T) {
+	m := &Manifest{Docs: []Rule{
+		{Path: "**/_scratch/**", Visibility: "private", Lifetime: "ephemeral", Sensitive: true},
+	}}
+	if err := prepare(m); err != nil {
+		t.Fatalf("sensitive rule without expire should be valid, got %v", err)
+	}
+	if m.Docs[0].Expire == nil || m.Docs[0].Expire.On != "worktree" {
+		t.Fatalf("expected expire to default to worktree, got %+v", m.Docs[0].Expire)
 	}
 }
 

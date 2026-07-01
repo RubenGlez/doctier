@@ -65,8 +65,7 @@ docs:
   - path: "**/_scratch/**"        # sensitive scratch, never committed
     visibility: private
     lifetime: ephemeral
-    sensitive: true
-    expire: { on: worktree }
+    sensitive: true               # dies with the worktree by default
 visibility:
   private: { backend: age, recipients_file: .doctier/recipients.txt }
 ```
@@ -133,7 +132,6 @@ docs:
     visibility: private
     lifetime: ephemeral
     sensitive: true
-    expire: { on: worktree }
 visibility:
   private: { backend: age, recipients_file: .doctier/recipients.txt }
 ```

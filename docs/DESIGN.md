@@ -122,8 +122,7 @@ docs:
     visibility: private
     lifetime: ephemeral
     sensitive: true              # nunca se commitea: gitignored + local al worktree (§7.3)
-    expire:
-      on: worktree               # muere con el worktree
+                                 # expire por defecto: on: worktree (se puede fijar ttl)
 
 # Configuración de los backends/ejes
 visibility:

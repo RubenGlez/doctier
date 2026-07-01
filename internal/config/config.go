@@ -97,6 +97,14 @@ func (m *Manifest) applyDefaults() {
 	if m.Policy.Uncovered == "" {
 		m.Policy.Uncovered = "allow"
 	}
+	// A sensitive file is local scratch; its natural life is the worktree, so
+	// default its expiry there instead of forcing the user to spell it out.
+	for i := range m.Docs {
+		r := &m.Docs[i]
+		if r.Sensitive && r.Lifetime == "ephemeral" && r.Expire == nil {
+			r.Expire = &Expire{On: "worktree"}
+		}
+	}
 }
 
 func (m *Manifest) validate() error {
@@ -142,6 +150,11 @@ func (m *Manifest) validate() error {
 		// silently ignored (the file is always tracked), so reject it loudly.
 		if r.Sensitive && r.Lifetime != "ephemeral" {
 			return fmt.Errorf("docs[%d] (%q): sensitive is only valid on ephemeral rules", i, r.Path)
+		}
+		// A sensitive file is never committed, so a merge-based trigger can never
+		// collect it; only worktree (dies with the worktree) or ttl (disk sweep).
+		if r.Sensitive && r.Expire != nil && r.Expire.On == "pr-merge" {
+			return fmt.Errorf("docs[%d] (%q): sensitive files are never committed; expire.on must be worktree or ttl, not pr-merge", i, r.Path)
 		}
 		// Unreachable rule: an earlier pattern already covers this one, so with
 		// first-match-wins this rule can never fire (a dangerous silent misclass).

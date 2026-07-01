@@ -29,12 +29,13 @@ docs:
   #   lifetime: ephemeral
   #   expire: { on: pr-merge }
 
-  # Example: sensitive scratch, never committed, local to the worktree
+  # Example: sensitive scratch, never committed, local to the worktree.
+  # sensitive defaults to expire on worktree removal; add expire: { on: ttl,
+  # ttl_days: N } instead for a disk safety net.
   # - path: "**/_scratch/**"
   #   visibility: private
   #   lifetime: ephemeral
   #   sensitive: true
-  #   expire: { on: worktree }
 
 visibility:
   private:
