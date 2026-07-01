@@ -55,6 +55,9 @@ type LifetimeCfg struct {
 
 type EphemeralCfg struct {
 	DefaultScope string `yaml:"default_scope"` // worktree (default) | branch
+	// IntegrationBranch is where pr-merge ephemerals are collected. Empty means
+	// auto-detect (origin/HEAD, else main/master).
+	IntegrationBranch string `yaml:"integration_branch"`
 }
 
 type PolicyCfg struct {
@@ -92,11 +95,16 @@ func (m *Manifest) applyDefaults() {
 		m.Lifetime.Ephemeral.DefaultScope = "worktree"
 	}
 	if m.Policy.Uncovered == "" {
-		m.Policy.Uncovered = "block"
+		m.Policy.Uncovered = "allow"
 	}
 }
 
 func (m *Manifest) validate() error {
+	switch m.Policy.Uncovered {
+	case "allow", "warn", "block":
+	default:
+		return fmt.Errorf("policy.uncovered must be allow|warn|block, got %q", m.Policy.Uncovered)
+	}
 	for i, r := range m.Docs {
 		switch r.Visibility {
 		case "public", "private":
@@ -120,8 +128,27 @@ func (m *Manifest) validate() error {
 			if r.Expire.On == "ttl" && r.Expire.TTLDays <= 0 {
 				return fmt.Errorf("docs[%d] (%q): ttl expiry requires ttl_days > 0", i, r.Path)
 			}
+			// worktree lifetime is only well-defined for local files: a tracked
+			// file lives in the branch, not a worktree, so it can never be
+			// collected on `git worktree remove`. Require sensitive (local-only).
+			if r.Expire.On == "worktree" && !r.Sensitive {
+				return fmt.Errorf("docs[%d] (%q): expire.on=worktree requires sensitive:true (a tracked file lives in the branch, not a worktree)", i, r.Path)
+			}
 		default:
 			return fmt.Errorf("docs[%d] (%q): lifetime must be durable|ephemeral, got %q", i, r.Path, r.Lifetime)
+		}
+		// sensitive keeps a file out of git; only meaningful on ephemerals, which
+		// are the only rules that can be local-only. On a durable rule it would be
+		// silently ignored (the file is always tracked), so reject it loudly.
+		if r.Sensitive && r.Lifetime != "ephemeral" {
+			return fmt.Errorf("docs[%d] (%q): sensitive is only valid on ephemeral rules", i, r.Path)
+		}
+		// Unreachable rule: an earlier pattern already covers this one, so with
+		// first-match-wins this rule can never fire (a dangerous silent misclass).
+		for j := 0; j < i; j++ {
+			if ok, _ := doublestar.Match(m.Docs[j].Path, r.Path); ok {
+				return fmt.Errorf("docs[%d] (%q) is unreachable: earlier rule docs[%d] (%q) already matches it (first-match-wins)", i, r.Path, j, m.Docs[j].Path)
+			}
 		}
 	}
 	return nil
@@ -138,6 +165,23 @@ func (m *Manifest) Match(path string) (Rule, bool) {
 		}
 	}
 	return Rule{}, false
+}
+
+// DefaultRule is the implicit classification for a document that no rule covers:
+// public + durable, i.e. plain git's default (tracked plaintext, kept forever).
+// Users only write rules for the exceptions (private or ephemeral docs).
+func DefaultRule() Rule {
+	return Rule{Path: "**/*", Visibility: "public", Lifetime: "durable"}
+}
+
+// Effective returns the classification doctier applies to path: the first
+// matching rule, or DefaultRule when none matches. covered reports whether an
+// explicit rule matched (used only by the opt-in policy.uncovered=block gate).
+func (m *Manifest) Effective(path string) (rule Rule, covered bool) {
+	if r, ok := m.Match(path); ok {
+		return r, true
+	}
+	return DefaultRule(), false
 }
 
 // Encrypted reports whether a matched rule's content is stored encrypted in git

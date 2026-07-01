@@ -49,6 +49,14 @@ func runFilter(args []string) error {
 }
 
 func clean(m *config.Manifest, root, file string, plaintext []byte) error {
+	// Guard against double-encryption: if the input is already age ciphertext
+	// (e.g. a keyless checkout left ciphertext in the working tree via the
+	// fail-open smudge, and the file is being re-added), pass it through
+	// unchanged instead of encrypting it again and corrupting it.
+	if agex.IsEncrypted(plaintext) {
+		_, err := os.Stdout.Write(plaintext)
+		return err
+	}
 	recipients, err := agex.LoadRecipients(recipientsPath(m, root))
 	if err != nil {
 		return err

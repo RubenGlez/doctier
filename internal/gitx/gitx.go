@@ -3,8 +3,11 @@ package gitx
 
 import (
 	"bytes"
+	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // run executes git with args and returns stdout, trimmed. stderr is folded into
@@ -102,6 +105,39 @@ func Worktrees() ([]string, error) {
 func Prune() error {
 	_, err := run("worktree", "prune")
 	return err
+}
+
+// DefaultBranch returns the integration branch pr-merge ephemerals are collected
+// on: origin's HEAD if known, else a local main/master, else "main".
+func DefaultBranch() string {
+	if out, err := run("symbolic-ref", "--short", "refs/remotes/origin/HEAD"); err == nil && out != "" {
+		return strings.TrimPrefix(out, "origin/")
+	}
+	for _, b := range []string{"main", "master"} {
+		if _, err := run("rev-parse", "--verify", "--quiet", "refs/heads/"+b); err == nil {
+			return b
+		}
+	}
+	return "main"
+}
+
+// LastCommitTime returns the committer date of the most recent commit that
+// touched path. It errors when no commit touches path (untracked/uncommitted),
+// so callers can fall back to filesystem mtime. Unlike mtime, this survives
+// clones and checkouts.
+func LastCommitTime(path string) (time.Time, error) {
+	out, err := run("log", "-1", "--format=%ct", "--", path)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if out == "" {
+		return time.Time{}, fmt.Errorf("no commits for %s", path)
+	}
+	sec, err := strconv.ParseInt(out, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(sec, 0), nil
 }
 
 // CurrentBranch returns the checked-out branch name, or "" if detached.

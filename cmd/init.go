@@ -12,15 +12,12 @@ import (
 
 const manifestTemplate = `version: 1
 
-# The user decides everything here. Two independent axes per glob:
+# doctier only needs rules for the EXCEPTIONS. A document that matches no rule is
+# public + durable — plain git's default (tracked plaintext, kept forever). Two
+# independent axes per glob, first matching rule wins:
 #   visibility: public | private        (private is encrypted with age)
 #   lifetime:   durable | ephemeral     (ephemeral = finite life, auto-deleted)
-# First matching rule wins.
 docs:
-  - path: "**/*"            # base rule: nothing stays unclassified (fail-closed)
-    visibility: public
-    lifetime: durable
-
   # Example: product strategy -> private + durable (encrypted, tracked forever)
   # - path: "docs/strategy/**"
   #   visibility: private
@@ -48,8 +45,10 @@ lifetime:
   ephemeral:
     default_scope: worktree
 
-policy:
-  uncovered: block
+# Optional strictness: refuse to commit any file that matches no rule above,
+# forcing every document to be classified explicitly. Default: allow.
+# policy:
+#   uncovered: block
 `
 
 const recipientsTemplate = `# doctier recipients — one SSH public key per line (age reuses SSH keys).
@@ -63,7 +62,9 @@ exec doctier check --staged
 `
 
 const postMergeHook = `#!/usr/bin/env sh
-# doctier: collect pr-merge ephemerals after an integrating merge.
+# doctier: collect pr-merge ephemerals after an integrating merge. This is a no-op
+# unless the current branch is the integration branch, so it is safe on a routine
+# 'git pull' of a feature branch.
 exec doctier gc --trigger pr-merge
 `
 

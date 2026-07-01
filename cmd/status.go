@@ -25,11 +25,7 @@ func runStatus(args []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "DOCUMENT\tVISIBILITY\tLIFETIME\tSTORAGE\tEXPIRES")
 	for _, f := range files {
-		rule, ok := m.Match(f)
-		if !ok {
-			fmt.Fprintf(w, "%s\t—\t—\t(uncovered)\t—\n", f)
-			continue
-		}
+		rule, _ := m.Effective(f)
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
 			f, rule.Visibility, rule.Lifetime, storage(rule), expiry(rule))
 	}

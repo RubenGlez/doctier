@@ -92,15 +92,15 @@ Un único fichero declarativo en la raíz del repo, `.doctier.yml`, versionado. 
 decide todo**: qué rutas son públicas o privadas, cuáles duraderas o efímeras, y —si son
 efímeras— con qué disparador y qué parámetros. La herramienta solo lee este archivo.
 
+Solo se escriben reglas para las **excepciones**: un documento que no casa ninguna
+regla es `public` + `durable`, el comportamiento por defecto de git (rastreado en
+claro, para siempre). No hace falta una regla base `**/*`.
+
 ```yaml
 version: 1
 
 # Cada regla: un patrón glob + sus dos ejes. La primera regla que casa, gana.
 docs:
-  - path: "**/*"                 # regla base: nada queda sin clasificar (fail-closed)
-    visibility: public
-    lifetime: durable
-
   - path: "docs/strategy/**"
     visibility: private          # cifrado con age
     lifetime: durable
@@ -135,8 +135,10 @@ lifetime:
   ephemeral:
     default_scope: worktree      # para 'on: worktree'; configurable (§7.2)
 
-policy:
-  uncovered: block               # doc sin regla que case => se bloquea el commit
+# Estrictez opcional (por defecto: allow). Si se activa, un doc que no case
+# ninguna regla bloquea el commit, forzando clasificación explícita.
+# policy:
+#   uncovered: block
 ```
 
 Punto clave de diseño: **cambiar el backend de privacidad, o reclasificar un fichero, es editar
@@ -229,6 +231,11 @@ worktree|branch`), con **worktree por defecto**:
 - **`branch`**: se asocian al nombre de rama; se recolectan al fusionar/borrar la rama. Útil sin
   worktrees, pero dos worktrees en la misma rama compartirían efímeros.
 
+> **Prototipo:** `on: worktree` exige `sensitive: true` (local al worktree). Un fichero
+> rastreado vive en la rama, no en un worktree, así que no podría recolectarse con
+> `git worktree remove`. El alcance `branch` está diseñado pero aún no implementado; para
+> efímeros rastreados usa `pr-merge` o `ttl`.
+
 ### 7.3 Borrado y la historia de git (decisión: solo local para lo sensible)
 
 Un efímero **rastreado** que se borra desaparece del árbol de trabajo, pero **su contenido sigue
@@ -292,7 +299,8 @@ El fallo más grave es **publicar contenido privado en claro** por accidente. El
 
 - Una ruta `private` está staged **sin cifrar**.
 - Una ruta efímera `sensitive` está staged (nunca debe commitearse).
-- Un doc **no casa ninguna regla** y `policy.uncovered: block` (fuerza clasificación explícita).
+- Un doc **no casa ninguna regla** y se ha activado `policy.uncovered: block` (opt-in,
+  por defecto `allow`: los no cubiertos se tratan como `public` + `durable`).
 
 El mismo `doctier check` corre en **CI** como última barrera (no depende de que el cliente tenga
 los hooks instalados). Este comportamiento fail-closed es lo que hace la solución fiable: la
@@ -368,9 +376,7 @@ Ninguna decisión de diseño queda abierta; lo que resta es detalle de construcc
 ```yaml
 version: 1
 docs:
-  - path: "**/*"                          # base fail-closed
-    visibility: public
-    lifetime: durable
+  # Sin regla base: lo no cubierto es public + durable por defecto.
 
   # Estrategia de producto → privada y duradera
   - path: ".harness/product/**"
@@ -408,6 +414,4 @@ visibility:
   private: { backend: age, recipients_file: .doctier/recipients.txt }
 lifetime:
   ephemeral: { default_scope: worktree }
-policy:
-  uncovered: block
 ```

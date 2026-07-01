@@ -66,11 +66,17 @@ func gcTTL(m *config.Manifest, root string, files []string, dry bool) int {
 			continue
 		}
 		abs := filepath.Join(root, f)
-		info, err := os.Stat(abs)
+		// Prefer the last commit date (survives clones/checkouts); fall back to
+		// filesystem mtime for local-only files that are never committed.
+		ref, err := gitx.LastCommitTime(f)
 		if err != nil {
-			continue
+			info, statErr := os.Stat(abs)
+			if statErr != nil {
+				continue
+			}
+			ref = info.ModTime()
 		}
-		age := now.Sub(info.ModTime())
+		age := now.Sub(ref)
 		if age < time.Duration(rule.Expire.TTLDays)*24*time.Hour {
 			continue
 		}
@@ -87,6 +93,20 @@ func gcTTL(m *config.Manifest, root string, files []string, dry bool) int {
 }
 
 func gcPRMerge(m *config.Manifest, files []string, dry bool) int {
+	// pr-merge collection only runs on the integration branch: a doc's PR is
+	// considered merged once the doc is present there. On a feature branch these
+	// ephemerals are still in flight, so collecting would be destructive (e.g. a
+	// post-merge hook firing on a routine `git pull`).
+	integ := m.Lifetime.Ephemeral.IntegrationBranch
+	if integ == "" {
+		integ = gitx.DefaultBranch()
+	}
+	cur, err := gitx.CurrentBranch()
+	if err != nil || cur != integ {
+		fmt.Printf("  pr-merge: skipped — not on integration branch %q (on %q)\n", integ, cur)
+		return 0
+	}
+
 	n := 0
 	for _, f := range files {
 		rule, ok := m.Match(f)
