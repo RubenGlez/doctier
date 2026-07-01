@@ -1,118 +1,118 @@
-# Diseño: privacidad y ciclo de vida de documentos generados
+# Design: privacy and lifecycle of generated documents
 
-> Documento de diseño de **`doctier`**: una **CLI standalone, agnóstica de cualquier arnés,
-> que vive en su propio repositorio** y funciona sobre git. Clasifica los documentos que un
-> flujo de trabajo genera según **dos ejes independientes —visibilidad y duración— definidos
-> por el usuario en un archivo de configuración**, y hace cumplir esa clasificación de forma
-> automática. Pensada de raíz para funcionar con **git worktrees** (agentes de codificación en
-> paralelo). No incluye implementación; su propósito es acordar el enfoque antes de construir.
+> Design document for **`doctier`**: a **standalone CLI, agnostic to any harness,
+> living in its own repository** and working on top of git. It classifies the documents that a
+> workflow generates according to **two independent axes —visibility and lifetime— defined
+> by the user in a configuration file**, and enforces that classification
+> automatically. Designed from the ground up to work with **git worktrees** (parallel coding
+> agents). It includes no implementation; its purpose is to agree on the approach before building.
 >
-> Las decisiones tomadas hasta ahora están resumidas en §13.
+> The decisions made so far are summarized in §13.
 
-## 1. Problema
+## 1. Problem
 
-Un flujo de trabajo con agentes genera documentación a lo largo del desarrollo: estrategia de
-producto, arquitectura, decisiones, informes de QA, PRDs previos a una feature, notas de
-prototipo… Hoy, en el arnés que motiva este diseño, **todo se guarda en `.harness/` y está
-gitignored en bloque**: ningún documento viaja por git, así que nada se respalda ni se comparte,
-y todo es local.
+An agent workflow generates documentation throughout development: product strategy,
+architecture, decisions, QA reports, PRDs ahead of a feature, prototype
+notes… Today, in the harness that motivates this design, **everything is stored in `.harness/` and is
+gitignored wholesale**: no document travels through git, so nothing is backed up or shared,
+and everything is local.
 
-Eso no encaja con lo que se necesita. Distintos documentos tienen distintas necesidades en **dos
-dimensiones que son independientes entre sí**:
+That doesn't fit what's needed. Different documents have different needs along **two
+dimensions that are independent of each other**:
 
-- **Quién puede leerlos** — algunos son seguros de compartir (ingeniería, ADRs); otros son la
-  ventaja competitiva y no deben ser públicos (estrategia de producto).
-- **Cuánto deben vivir** — algunos son permanentes; otros son transitorios (un PRD que se crea
-  antes de una feature, se usa durante el desarrollo y la verificación, y debe desaparecer).
+- **Who can read them** — some are safe to share (engineering, ADRs); others are the
+  competitive advantage and must not be public (product strategy).
+- **How long they should live** — some are permanent; others are transient (a PRD that's created
+  ahead of a feature, used during development and verification, and must then disappear).
 
-### Causa raíz
+### Root cause
 
-Git modela **un solo eje y con solo dos estados**: un fichero está rastreado (visible para
-quien tenga el repo) o ignorado (local). No existe de forma nativa "privado pero compartido",
-ni "se borra solo cuando se cumple una condición". `doctier` construye los **dos ejes que faltan
-encima de git**, sin depender de ningún arnés.
+Git models **a single axis with only two states**: a file is tracked (visible to
+anyone with the repo) or ignored (local). There's no native "private but shared",
+nor "deletes itself when a condition is met". `doctier` builds the **two missing axes
+on top of git**, without depending on any harness.
 
-## 2. Objetivos y no-objetivos
+## 2. Goals and non-goals
 
-**Objetivos**
-- Modelar la clasificación como **dos ejes independientes**: visibilidad × duración (§3).
-- Que **el usuario** decida, en un archivo de configuración, qué patrones caen en cada valor de
-  cada eje (§4). La herramienta **no tiene opinión sobre ficheros concretos**.
-- Hacer cumplir la clasificación automáticamente, **fail-closed**: que sea imposible por
-  accidente publicar contenido privado o dejar sin recolectar un efímero.
-- **Agnóstico**: CLI standalone en su propio repo; cualquier proyecto git la adopta. El arnés
-  es solo un consumidor más (§11).
-- **Agnóstico del host**: igual en GitHub, GitLab o self-hosted, repo público o privado.
-- **Worktrees como caso de primera clase** (agentes en paralelo, cada uno en su worktree) (§8).
+**Goals**
+- Model classification as **two independent axes**: visibility × lifetime (§3).
+- Let **the user** decide, in a configuration file, which patterns fall into each value of
+  each axis (§4). The tool **has no opinion about specific files**.
+- Enforce the classification automatically, **fail-closed**: make it impossible to
+  accidentally publish private content or leave an ephemeral uncollected.
+- **Agnostic**: standalone CLI in its own repo; any git project can adopt it. The harness
+  is just one more consumer (§11).
+- **Host-agnostic**: the same on GitHub, GitLab or self-hosted, public or private repo.
+- **Worktrees as a first-class case** (parallel agents, each in its worktree) (§8).
 
-**No-objetivos**
-- No es un gestor documental ni un wiki. Solo clasifica y aplica políticas.
-- No es una herramienta de colaboración/comentarios (STRATEGY.md §5); eso diluiría el foco.
-- No sustituye el control de acceso del host para lo público; lo complementa.
-- No garantiza ocultar la *existencia* del contenido privado, solo su lectura (ver §6, metadatos).
-- No soporta backend de cifrado alternativo (repo privado separado): descartado por romper los
-  diferenciadores (§6, STRATEGY.md §4).
+**Non-goals**
+- It's not a document manager or a wiki. It only classifies and enforces policies.
+- It's not a collaboration/comments tool (STRATEGY.md §5); that would dilute the focus.
+- It doesn't replace the host's access control for public content; it complements it.
+- It doesn't guarantee hiding the *existence* of private content, only that it can't be read (see §6, metadata).
+- It doesn't support an alternative encryption backend (separate private repo): discarded for breaking the
+  differentiators (§6, STRATEGY.md §4).
 
-## 3. Modelo: dos ejes independientes
+## 3. Model: two independent axes
 
-La pieza conceptual central. Cada documento (o patrón de rutas) se describe con **dos
-propiedades ortogonales**:
+The central conceptual piece. Each document (or path pattern) is described by **two
+orthogonal properties**:
 
-### Eje A — Visibilidad (quién puede leer el contenido)
+### Axis A — Visibility (who can read the content)
 
-- **`public`** — texto plano. Si se rastrea en git, cualquiera con el repo lo lee.
-- **`private`** — cifrado (backend `age` por defecto, §6). Solo quien tenga la clave lo lee,
-  aunque el blob esté en un repo accesible.
+- **`public`** — plaintext. If tracked in git, anyone with the repo can read it.
+- **`private`** — encrypted (`age` backend by default, §6). Only someone with the key can read it,
+  even if the blob sits in an accessible repo.
 
-### Eje B — Duración (cuánto vive el fichero)
+### Axis B — Lifetime (how long the file lives)
 
-- **`durable`** — vida indefinida. Persiste hasta que alguien lo cambie o borre a mano.
-- **`ephemeral`** — **vida finita**: se **borra automáticamente** cuando se cumple su
-  disparador. **Efímero NO significa gitignored** — significa borrado programado. Un efímero
-  puede estar perfectamente rastreado (y por tanto viajar por git) durante su vida, y luego
-  desaparecer. Disparadores (§7): `pr-merge`, `worktree`, `ttl`.
+- **`durable`** — indefinite lifetime. Persists until someone changes or deletes it by hand.
+- **`ephemeral`** — **finite lifetime**: **deleted automatically** when its
+  trigger fires. **Ephemeral does NOT mean gitignored** — it means scheduled deletion. An ephemeral
+  can be perfectly tracked (and therefore travel through git) during its lifetime, and then
+  disappear. Triggers (§7): `pr-merge`, `worktree`, `ttl`.
 
-### La matriz completa
+### The full matrix
 
-Los dos ejes se combinan libremente; las cuatro celdas son válidas:
+The two axes combine freely; all four cells are valid:
 
-| | **Durable** | **Efímero** (vida finita) |
+| | **Durable** | **Ephemeral** (finite lifetime) |
 |---|---|---|
-| **Público** | Rastreado siempre. *Ej.: arquitectura, ADRs.* | Rastreado; viaja en git; se borra al disparador. *Ej.: PRD que va en la PR y desaparece al fusionar.* |
-| **Privado** | Cifrado + rastreado siempre. *Ej.: estrategia de producto.* | Cifrado + rastreado; se borra al disparador. *Ej.: nota estratégica de una feature.* |
+| **Public** | Always tracked. *E.g.: architecture, ADRs.* | Tracked; travels in git; deleted on trigger. *E.g.: a PRD that goes in the PR and disappears on merge.* |
+| **Private** | Encrypted + always tracked. *E.g.: product strategy.* | Encrypted + tracked; deleted on trigger. *E.g.: a strategic note for a feature.* |
 
-**Consecuencia importante para worktrees:** al desacoplar duración de "estar rastreado", tanto
-duraderos como efímeros *rastreados* viajan solos a cada worktree por el propio git. El problema
-de "sembrar" un worktree casi desaparece (§8).
+**Important consequence for worktrees:** by decoupling lifetime from "being tracked", both
+durable and ephemeral *tracked* files travel on their own to each worktree via git itself. The problem
+of "seeding" a worktree almost disappears (§8).
 
-**Excepción para lo sensible (§7.3):** un efímero marcado como sensible **no se commitea nunca**
-(gitignored + local al worktree), para no dejar rastro en la historia de git. Es la única
-combinación que sí es local por diseño.
+**Exception for the sensitive case (§7.3):** an ephemeral marked as sensitive **is never committed**
+(gitignored + local to the worktree), so as not to leave a trace in git history. It's the only
+combination that is local by design.
 
-## 4. El archivo de configuración (dirigido por el usuario)
+## 4. The configuration file (user-driven)
 
-Un único fichero declarativo en la raíz del repo, `.doctier.yml`, versionado. **El usuario
-decide todo**: qué rutas son públicas o privadas, cuáles duraderas o efímeras, y —si son
-efímeras— con qué disparador y qué parámetros. La herramienta solo lee este archivo.
+A single declarative file at the repo root, `.doctier.yml`, versioned. **The user
+decides everything**: which paths are public or private, which durable or ephemeral, and —if they're
+ephemeral— with which trigger and which parameters. The tool only reads this file.
 
-Solo se escriben reglas para las **excepciones**: un documento que no casa ninguna
-regla es `public` + `durable`, el comportamiento por defecto de git (rastreado en
-claro, para siempre). No hace falta una regla base `**/*`.
+You only write rules for the **exceptions**: a document that matches no
+rule is `public` + `durable`, git's default behavior (tracked in
+cleartext, forever). No base `**/*` rule is needed.
 
 ```yaml
 version: 1
 
-# Cada regla: un patrón glob + sus dos ejes. La primera regla que casa, gana.
+# Each rule: a glob pattern + its two axes. The first rule that matches wins.
 docs:
   - path: "docs/strategy/**"
-    visibility: private          # cifrado con age
+    visibility: private          # encrypted with age
     lifetime: durable
 
   - path: "**/*.prd.md"
     visibility: public
     lifetime: ephemeral
     expire:
-      on: pr-merge               # se borra al fusionar la PR
+      on: pr-merge               # deleted when the PR merges
 
   - path: "docs/strategy/*.wip.md"
     visibility: private
@@ -124,283 +124,283 @@ docs:
   - path: "**/_scratch/**"
     visibility: private
     lifetime: ephemeral
-    sensitive: true              # nunca se commitea: gitignored + local al worktree (§7.3)
-                                 # expire por defecto: on: worktree (se puede fijar ttl)
+    sensitive: true              # never committed: gitignored + local to the worktree (§7.3)
+                                 # default expire: on: worktree (ttl can be set)
 
-# Configuración (claves de nivel superior; nombradas para no colisionar con los
-# ejes por-regla 'visibility' y 'lifetime')
-recipients_file: .doctier/recipients.txt   # quién lee lo privado (gestionado con grant)
+# Configuration (top-level keys; named so they don't collide with the
+# per-rule axes 'visibility' and 'lifetime')
+recipients_file: .doctier/recipients.txt   # who can read the private content (managed with grant)
 
-# ephemeral: integration_branch es dónde se recolectan los efímeros pr-merge;
-# omítelo para autodetectar (origin/HEAD, si no main/master).
+# ephemeral: integration_branch is where pr-merge ephemerals are collected;
+# omit it to autodetect (origin/HEAD, else main/master).
 # ephemeral:
 #   integration_branch: main
 
-# Estrictez opcional (por defecto: allow). Si se activa, un doc que no case
-# ninguna regla bloquea el commit, forzando clasificación explícita.
+# Optional strictness (default: allow). If enabled, a doc that matches
+# no rule blocks the commit, forcing explicit classification.
 # policy:
 #   uncovered: block
 ```
 
-Punto clave de diseño: **cambiar el backend de privacidad, o reclasificar un fichero, es editar
-este archivo**. No cambia cómo el arnés (u otro consumidor) *escribe* los documentos; solo
-cambia qué hace `doctier` con ellos.
+Key design point: **changing the privacy backend, or reclassifying a file, is editing
+this file**. It doesn't change how the harness (or any other consumer) *writes* the documents; it only
+changes what `doctier` does with them.
 
-## 5. Mecanismo derivado de cada combinación
+## 5. Mechanism derived from each combination
 
-`doctier` traduce cada regla a primitivas de git:
+`doctier` translates each rule into git primitives:
 
-| Visibilidad | Duración | Mecanismo |
+| Visibility | Lifetime | Mechanism |
 |---|---|---|
-| public | durable | Rastreado normal. |
-| private | durable | Rastreado con filtro `clean/smudge` (age): cifra al `git add`, descifra al checkout. |
-| public | ephemeral | Rastreado normal; un disparador (§7) hace `git rm` + commit al expirar. |
-| private | ephemeral (no sensible) | Rastreado cifrado; disparador hace `git rm` + commit al expirar (el ciphertext queda en historia). |
-| cualquiera | ephemeral + `sensitive: true` | **Nunca rastreado**: gitignored + almacenado local al worktree; se borra del disco al expirar. Sin rastro en historia. |
+| public | durable | Normal tracking. |
+| private | durable | Tracked with a `clean/smudge` filter (age): encrypts on `git add`, decrypts on checkout. |
+| public | ephemeral | Normal tracking; a trigger (§7) does `git rm` + commit on expiry. |
+| private | ephemeral (non-sensitive) | Tracked encrypted; trigger does `git rm` + commit on expiry (the ciphertext stays in history). |
+| any | ephemeral + `sensitive: true` | **Never tracked**: gitignored + stored local to the worktree; deleted from disk on expiry. No trace in history. |
 
-## 6. Nivel privado: cifrado con age
+## 6. Private tier: encryption with age
 
-El contenido privado se persiste y comparte con autorizados pero nunca se lee en claro desde el
-repo. El mecanismo es **`age`, cifrado in-situ**. Se evaluaron dos opciones; abajo la comparación y
-por qué la otra quedó como no-objetivo.
+Private content is persisted and shared with authorized parties but never read in cleartext from the
+repo. The mechanism is **`age`, in-place encryption**. Two options were evaluated; below is the comparison and
+why the other was left as a non-goal.
 
-> **Decisión:** `age` es el único mecanismo. El manifiesto **no expone selector de backend** — un
-> repo privado separado (Opción B) se descartó por chocar con los diferenciadores de `doctier`
-> (ver más abajo y STRATEGY.md §4).
+> **Decision:** `age` is the only mechanism. The manifest **exposes no backend selector** — a
+> separate private repo (Option B) was discarded for clashing with `doctier`'s differentiators
+> (see below and STRATEGY.md §4).
 
-### Opción A — Cifrado in-situ (age) · POR DEFECTO
+### Option A — In-place encryption (age) · DEFAULT
 
-Mismo repo, filtro `clean/smudge` + `.gitattributes`: el blob guardado es ciphertext; el filtro
-`smudge` descifra en cada checkout (y por tanto en cada worktree). Claves gestionadas como
-recipients de `age`, **reutilizando las claves SSH** que la gente ya tiene (age las soporta), sin
-ceremonia de claves nuevas. `doctier grant` añade una clave al recipients file y **re-cifra** los
-ficheros afectados; revocar = quitar la línea del recipients file + re-ejecutar `grant` (re-cifra al
-set actual). No hay comando `revoke` aparte.
+Same repo, `clean/smudge` filter + `.gitattributes`: the stored blob is ciphertext; the
+`smudge` filter decrypts on each checkout (and therefore in each worktree). Keys managed as
+`age` recipients, **reusing the SSH keys** people already have (age supports them), without
+a new-key ceremony. `doctier grant` adds a key to the recipients file and **re-encrypts** the
+affected files; revoke = remove the line from the recipients file + re-run `grant` (re-encrypts to the
+current set). There's no separate `revoke` command.
 
-- **Pros**: un solo repo, mínima fricción; agnóstico del host (sirve hasta en repo público);
-  historia atómica junto al código; **compatibilidad nativa con worktrees** (viaja por checkout,
-  sin hooks de sembrado); onboarding = añadir una clave.
-- **Contras**: la historia de git es para siempre → una clave filtrada expone *todas* las
-  versiones históricas; los blobs cifrados no diffean/mergean bien (conflictos binarios); **fuga
-  de metadatos** (nombres, tamaños, fechas, autores, mensajes de commit siguen públicos);
-  gestión/rotación de claves.
-- `age` sobre `git-crypt`: claves modernas y multi-recipient más simples; `git-crypt` está atado
-  a GPG y con mantenimiento escaso.
+- **Pros**: a single repo, minimal friction; host-agnostic (works even in a public repo);
+  atomic history alongside the code; **native worktree compatibility** (travels via checkout,
+  no seeding hooks); onboarding = add a key.
+- **Cons**: git history is forever → a leaked key exposes *all* historical
+  versions; encrypted blobs don't diff/merge well (binary conflicts); **metadata
+  leakage** (names, sizes, dates, authors, commit messages remain public);
+  key management/rotation.
+- `age` over `git-crypt`: modern keys and simpler multi-recipient; `git-crypt` is tied
+  to GPG and poorly maintained.
 
-### Opción B — Repo privado separado (considerada y descartada como no-objetivo)
+### Option B — Separate private repo (considered and discarded as a non-goal)
 
-Alternativa evaluada: la estrategia vive en su propio repo git privado, mantenido como repo hermano
-sincronizado por `doctier`.
+Alternative evaluated: strategy lives in its own private git repo, kept as a sibling repo
+synced by `doctier`.
 
-- **Pros**: separación real, cero fuga de contenido y metadatos al repo público; acceso nativo
-  del host y **revocable**; texto plano dentro del repo privado (diff/merge/blame normales); sin
-  gestión de claves.
-- **Contras**: dos repos que sincronizar; **fricción con worktrees** (hay que resolver el repo
-  hermano por worktree); cuesta mantener atómico "código + cambio de estrategia".
+- **Pros**: real separation, zero content and metadata leakage to the public repo; native host
+  access and **revocable**; plaintext inside the private repo (normal diff/merge/blame); no
+  key management.
+- **Cons**: two repos to sync; **friction with worktrees** (you have to resolve the sibling
+  repo per worktree); it's costly to keep "code + strategy change" atomic.
 
-**Descartada como no-objetivo (ver STRATEGY.md §4).** Un repo separado no es *tracked-encrypted
-in-place*, así que **rompe los dos diferenciadores defendibles** de `doctier`: decrypt-into-context
-(el agente lee en claro localmente mientras git guarda cifrado) y worktree-native por tracked-
-encrypted (el privado viaja solo por checkout, sin sembrado). Mantenerla como "backend enchufable"
-diluye el foco; por eso el manifiesto **no expone selector de backend**. Si en el futuro hace falta
-aislamiento duro o revocación real vía host, se reevaluaría entonces.
+**Discarded as a non-goal (see STRATEGY.md §4).** A separate repo is not *tracked-encrypted
+in-place*, so it **breaks `doctier`'s two defensible differentiators**: decrypt-into-context
+(the agent reads cleartext locally while git stores encrypted) and worktree-native via tracked-
+encrypted (private content travels on its own via checkout, no seeding). Keeping it as a "pluggable backend"
+dilutes the focus; that's why the manifest **exposes no backend selector**. If hard isolation
+or real host-based revocation is ever needed, it would be reevaluated then.
 
-### Por qué age
+### Why age
 
-El caso principal es un repo de equipo (privado) donde el objetivo es que *no todo el que tiene
-acceso lea la estrategia* y que *no se filtre a forks/mirrors*. Ahí `age` gana: menos fricción,
-un repo, y —decisivo aquí— **compatibilidad nativa con worktrees**.
+The primary case is a team repo (private) where the goal is that *not everyone with
+access reads the strategy* and that *it doesn't leak to forks/mirrors*. There `age` wins: less friction,
+one repo, and —decisive here— **native worktree compatibility**.
 
-## 7. Duración efímera: disparadores, alcance y borrado
+## 7. Ephemeral lifetime: triggers, scope and deletion
 
-"Efímero" = vida finita. `doctier` soporta tres disparadores de expiración, elegidos por regla en
+"Ephemeral" = finite lifetime. `doctier` supports three expiration triggers, chosen per rule in
 `expire.on`:
 
-### 7.1 Disparadores
+### 7.1 Triggers
 
-- **`pr-merge`** — se borra cuando la PR/rama se fusiona. Ideal para un PRD que debe existir y
-  viajar *dentro* de la PR (revisable), y desaparecer una vez integrada la feature. Detectar el
-  merge es intrínsecamente cosa del host (los squash merges no dejan commit de merge; la rama
-  puede borrarse en remoto), así que `doctier` se mantiene agnóstico con un **comando genérico
-  `doctier gc`** que se invoca desde varios sitios: **CI como primario** (acción en el evento de
-  merge; se envían recetas de ejemplo por host), **hook local como refuerzo**, y **TTL como red
-  final** por si ambos fallan.
-- **`worktree`** — vive mientras exista el worktree; se recolecta al hacer `git worktree remove`.
-  Para scratch de un agente concreto.
-- **`ttl`** — expira tras `ttl_days` días. Red de seguridad y para material con caducidad natural.
+- **`pr-merge`** — deleted when the PR/branch merges. Ideal for a PRD that must exist and
+  travel *inside* the PR (reviewable), and disappear once the feature is integrated. Detecting the
+  merge is intrinsically a host concern (squash merges leave no merge commit; the branch
+  may be deleted on the remote), so `doctier` stays agnostic with a **generic
+  `doctier gc` command** invoked from several places: **CI as primary** (an action on the merge
+  event; example recipes per host are shipped), **local hook as reinforcement**, and **TTL as a final
+  net** in case both fail.
+- **`worktree`** — lives as long as the worktree exists; collected on `git worktree remove`.
+  For a specific agent's scratch.
+- **`ttl`** — expires after `ttl_days` days. Safety net and for material with a natural expiry.
 
-`doctier gc` centraliza la recolección: purga efímeros de ramas/worktrees ya desaparecidos y los
-que superan su TTL. Se puede invocar desde hooks, CI o a mano.
+`doctier gc` centralizes collection: it purges ephemerals from branches/worktrees that are gone and those
+that exceed their TTL. It can be invoked from hooks, CI or by hand.
 
-### 7.2 Alcance (decisión: configurable, worktree por defecto)
+### 7.2 Scope (decision: configurable, worktree by default)
 
-Para `on: worktree` se contemplaron dos alcances de vida:
+For `on: worktree`, two lifetime scopes were considered:
 
-- **`worktree`**: cada worktree tiene sus efímeros aislados; se van con
-  `git worktree remove`. Encaja con agentes en paralelo sin colisiones.
-- **`branch`**: se asocian al nombre de rama; se recolectan al fusionar/borrar la rama. Útil sin
-  worktrees, pero dos worktrees en la misma rama compartirían efímeros.
+- **`worktree`**: each worktree has its ephemerals isolated; they go away with
+  `git worktree remove`. Fits parallel agents without collisions.
+- **`branch`**: they're associated with the branch name; collected on merging/deleting the branch. Useful without
+  worktrees, but two worktrees on the same branch would share ephemerals.
 
-> **Prototipo:** solo existe el alcance `worktree`, y `on: worktree` exige `sensitive: true`
-> (local al worktree): un fichero rastreado vive en la rama, no en un worktree, así que no
-> podría recolectarse con `git worktree remove`. El alcance `branch` está diseñado pero no
-> implementado, así que el selector `default_scope` se **quitó del manifiesto** (se
-> reintroduciría con `branch`); para efímeros rastreados usa `pr-merge` o `ttl`.
+> **Prototype:** only the `worktree` scope exists, and `on: worktree` requires `sensitive: true`
+> (local to the worktree): a tracked file lives on the branch, not in a worktree, so it
+> couldn't be collected with `git worktree remove`. The `branch` scope is designed but not
+> implemented, so the `default_scope` selector was **removed from the manifest** (it would be
+> reintroduced with `branch`); for tracked ephemerals use `pr-merge` or `ttl`.
 
-### 7.3 Borrado y la historia de git (decisión: solo local para lo sensible)
+### 7.3 Deletion and git history (decision: local-only for the sensitive case)
 
-Un efímero **rastreado** que se borra desaparece del árbol de trabajo, pero **su contenido sigue
-en la historia de git para siempre**. Para un privado, el ciphertext permanece en la historia
-(recuperable, y expuesto si se filtra una clave). Política adoptada, **híbrida según
-sensibilidad**:
+A **tracked** ephemeral that's deleted disappears from the working tree, but **its content stays
+in git history forever**. For a private one, the ciphertext remains in history
+(recoverable, and exposed if a key leaks). Adopted policy, **hybrid based on
+sensitivity**:
 
-- **No sensible** → se rastrea y se borra normal (`git rm` + commit). Queda en historia:
-  auditable y recuperable. Es el comportamiento estándar y suficiente para la mayoría.
-- **`sensitive: true`** → **no se commitea nunca**: gitignored + local al worktree. Así no deja
-  rastro en la historia. Al expirar se borra del disco. Es la vía correcta para material efímero
-  verdaderamente sensible.
+- **Non-sensitive** → tracked and deleted normally (`git rm` + commit). Stays in history:
+  auditable and recoverable. It's the standard behavior and enough for most cases.
+- **`sensitive: true`** → **never committed**: gitignored + local to the worktree. This way it leaves no
+  trace in history. On expiry it's deleted from disk. It's the correct path for truly sensitive
+  ephemeral material.
 
-Se descarta la reescritura de historia (`filter-repo`) como mecanismo ordinario: reescribe
-historia compartida y es disruptiva. Queda como recurso manual de emergencia, fuera del flujo.
+History rewriting (`filter-repo`) is discarded as an ordinary mechanism: it rewrites
+shared history and is disruptive. It remains a manual emergency resource, outside the flow.
 
-## 8. Compatibilidad con worktrees (agentes en paralelo)
+## 8. Worktree compatibility (parallel agents)
 
-Motivo de ser del diseño: varios agentes trabajando a la vez, cada uno en su `git worktree`.
-Comportamiento por combinación al crear un worktree nuevo:
+The design's reason for being: several agents working at once, each in its own `git worktree`.
+Behavior per combination when creating a new worktree:
 
-| Tipo de doc | ¿Llega solo al worktree nuevo? | Mecanismo |
+| Doc type | Does it reach the new worktree on its own? | Mechanism |
 |---|---|---|
-| Público/Privado **durable** | **Sí**, nativo | Rastreados; el checkout los trae (privado se descifra con `smudge`). |
-| Público/Privado **efímero rastreado** | **Sí**, nativo | Igual que un rastreado cualquiera; luego expira por su disparador. |
-| Efímero **sensible/local** (`on: worktree`) | **No** (a propósito) | Gitignored → arranca vacío; es lo correcto (es scratch de esa unidad de trabajo). |
+| Public/Private **durable** | **Yes**, native | Tracked; checkout brings them (private is decrypted with `smudge`). |
+| Public/Private **tracked ephemeral** | **Yes**, native | Same as any tracked file; then expires by its trigger. |
+| **Sensitive/local** ephemeral (`on: worktree`) | **No** (on purpose) | Gitignored → starts empty; that's correct (it's scratch for that unit of work). |
 
-**Conclusión operativa:** al mover públicos y privados a ficheros *rastreados* (cifrados si
-procede), **desaparece la necesidad de un hook de "seeding"** como el `harness-seed-worktree.sh`
-actual, que hoy existe justamente porque `.harness/` es gitignored en bloque. Solo el scratch
-local sigue arrancando vacío, que es lo deseado.
+**Operational conclusion:** by moving public and private files to *tracked* files (encrypted if
+appropriate), **the need for a "seeding" hook disappears** — like the current `harness-seed-worktree.sh`,
+which today exists precisely because `.harness/` is gitignored wholesale. Only local
+scratch keeps starting empty, which is the desired behavior.
 
-**Aislamiento y recolección:** el scratch local vive dentro del directorio del worktree, así que
-dos agentes no colisionan y `git worktree remove` se lo lleva. `doctier gc` cubre worktrees
-abandonados (`git worktree prune`) y el TTL cubre huérfanos.
+**Isolation and collection:** local scratch lives inside the worktree directory, so
+two agents don't collide and `git worktree remove` takes it away. `doctier gc` covers abandoned
+worktrees (`git worktree prune`) and TTL covers orphans.
 
-**Consistencia de política:** `.doctier.yml` y `.gitattributes` están rastreados → todos los
-worktrees comparten la misma política sin sincronización manual. La clave `age` es de la
-máquina/usuario, válida para todos sus worktrees.
+**Policy consistency:** `.doctier.yml` and `.gitattributes` are tracked → all
+worktrees share the same policy without manual syncing. The `age` key is per
+machine/user, valid for all its worktrees.
 
-## 9. La CLI y su distribución (decisión: standalone en repo propio)
+## 9. The CLI and its distribution (decision: standalone in its own repo)
 
-`doctier` es una **CLI standalone en su propio repositorio**, escrita en **Go** (binario único
-estático: sin dependencias de runtime, arranque instantáneo en los filtros clean/smudge, y
-distribución trivial vía brew / descarga directa / `go install`). Cualquier proyecto git la adopta
-con `doctier init`. No arrastra copias de scripts por proyecto.
+`doctier` is a **standalone CLI in its own repository**, written in **Go** (single
+static binary: no runtime dependencies, instant startup in the clean/smudge filters, and
+trivial distribution via brew / direct download / `go install`). Any git project adopts it
+with `doctier init`. It doesn't drag per-project script copies around.
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `doctier init` | Scaffolding: `.doctier.yml`, entradas de `.gitattributes`/`.gitignore`, hooks y el filtro clean/smudge. |
-| `doctier check [--staged]` | Fail-closed: ningún privado en claro, ningún sensible staged, y (opt-in) ningún doc sin clasificar. Para pre-commit/pre-push y CI. |
-| `doctier status` | Muestra la clasificación efectiva de cada doc y su expiración. |
-| `doctier agents [--write]` | Emite un bloque tier-aware de contexto para `AGENTS.md`/`CLAUDE.md`. |
-| `doctier gc [--trigger T]` | Purga efímeros expirados (`ttl`/`worktree`/`pr-merge`/`all`). |
-| `doctier grant "<ssh-pubkey>"` | Añade un recipient y re-cifra los privados. Para **revocar**: quita la línea del recipients file y re-ejecuta `grant` (re-cifra al set actual). |
-| `doctier filter clean\|smudge <f>` | Filtro de git (lo invoca git, no una persona). |
+| `doctier init` | Scaffolding: `.doctier.yml`, `.gitattributes`/`.gitignore` entries, hooks and the clean/smudge filter. |
+| `doctier check [--staged]` | Fail-closed: no private content in cleartext, no sensitive file staged, and (opt-in) no unclassified doc. For pre-commit/pre-push and CI. |
+| `doctier status` | Shows the effective classification of each doc and its expiry. |
+| `doctier agents [--write]` | Emits a tier-aware context block for `AGENTS.md`/`CLAUDE.md`. |
+| `doctier gc [--trigger T]` | Purges expired ephemerals (`ttl`/`worktree`/`pr-merge`/`all`). |
+| `doctier grant "<ssh-pubkey>"` | Adds a recipient and re-encrypts private files. To **revoke**: remove the line from the recipients file and re-run `grant` (re-encrypts to the current set). |
+| `doctier filter clean\|smudge <f>` | Git filter (invoked by git, not by a person). |
 
-> Comandos `reveal`/`hide` (descifrar/cifrar en local para editar) se contemplaron pero **no están
-> implementados**: con el filtro smudge el working tree ya está en claro, así que no han hecho falta.
+> `reveal`/`hide` commands (decrypt/encrypt locally to edit) were considered but are **not
+> implemented**: with the smudge filter the working tree is already in cleartext, so they haven't been needed.
 
-## 10. Redes de seguridad (fail-closed)
+## 10. Safety nets (fail-closed)
 
-El fallo más grave es **publicar contenido privado en claro** por accidente. El hook
-`pre-commit`/`pre-push` (`doctier check`) **falla el commit** si:
+The most serious failure is **publishing private content in cleartext** by accident. The
+`pre-commit`/`pre-push` hook (`doctier check`) **fails the commit** if:
 
-- Una ruta `private` está staged **sin cifrar**.
-- Una ruta efímera `sensitive` está staged (nunca debe commitearse).
-- Un doc **no casa ninguna regla** y se ha activado `policy.uncovered: block` (opt-in,
-  por defecto `allow`: los no cubiertos se tratan como `public` + `durable`).
+- A `private` path is staged **unencrypted**.
+- A `sensitive` ephemeral path is staged (must never be committed).
+- A doc **matches no rule** and `policy.uncovered: block` has been enabled (opt-in,
+  default `allow`: uncovered ones are treated as `public` + `durable`).
 
-El mismo `doctier check` corre en **CI** como última barrera (no depende de que el cliente tenga
-los hooks instalados). Este comportamiento fail-closed es lo que hace la solución fiable: la
-seguridad no depende de la memoria de nadie.
+The same `doctier check` runs in **CI** as the last barrier (it doesn't depend on the client having
+the hooks installed). This fail-closed behavior is what makes the solution reliable: security
+doesn't depend on anyone's memory.
 
-## 11. Integración con un consumidor (el arnés, como ejemplo)
+## 11. Integration with a consumer (the harness, as an example)
 
-`doctier` no conoce al arnés. La adopción por un consumidor es solo:
+`doctier` doesn't know about the harness. Adoption by a consumer is just:
 
-1. Aportar su propio `.doctier.yml` clasificando sus rutas (ejemplo en el Apéndice A).
-2. **Sustituir** cualquier gitignore en bloque de sus docs por reglas conscientes de tiers.
-3. **Retirar/aligerar** hooks de seeding: los duraderos y efímeros rastreados ya viajan por git;
-   solo el scratch local podría necesitar arranque (y por diseño arranca vacío).
-4. Opcionalmente invocar `doctier gc` al cerrar una feature (o confiar en los hooks/CI).
+1. Provide its own `.doctier.yml` classifying its paths (example in Appendix A).
+2. **Replace** any wholesale gitignore of its docs with tier-aware rules.
+3. **Retire/lighten** seeding hooks: durable and tracked ephemeral files already travel via git;
+   only local scratch might need seeding (and by design it starts empty).
+4. Optionally invoke `doctier gc` when closing a feature (or rely on the hooks/CI).
 
-Cualquier otro proyecto git la adopta igual, sin nada del arnés.
+Any other git project adopts it the same way, with nothing from the harness.
 
-## 12. Migración desde el estado actual (del arnés)
+## 12. Migration from the current state (of the harness)
 
-1. Añadir `.doctier.yml` con las reglas del consumidor (Apéndice A).
-2. Sacar del gitignore lo que pase a ser rastreado (público durable, y privado durable/efímero
-   cifrado) y empezar a rastrearlo.
-3. Configurar `age` para lo privado.
-4. Mantener local solo el efímero `sensitive`; cablear `doctier gc` + hooks para la recolección.
-5. Sustituir `harness-gitignore.sh` (ignora en bloque) y aligerar `harness-seed-worktree.sh`.
-6. Correr `doctier check` en CI.
+1. Add `.doctier.yml` with the consumer's rules (Appendix A).
+2. Take out of gitignore whatever becomes tracked (public durable, and private durable/ephemeral
+   encrypted) and start tracking it.
+3. Configure `age` for private content.
+4. Keep only `sensitive` ephemerals local; wire `doctier gc` + hooks for collection.
+5. Replace `harness-gitignore.sh` (ignores wholesale) and lighten `harness-seed-worktree.sh`.
+6. Run `doctier check` in CI.
 
-Migración incremental: se puede empezar solo por lo privado (lo más urgente) y añadir el resto
-después.
+Incremental migration: you can start with just the private content (the most urgent) and add the rest
+later.
 
-## 13. Decisiones tomadas
+## 13. Decisions made
 
-1. **Cifrado privado**: **`age` in-situ, único mecanismo** (sin selector de backend). El repo
-   privado separado se descartó como no-objetivo por romper los diferenciadores. §6.
-2. **Clasificación dirigida por el usuario**: un `.doctier.yml` donde el usuario decide
-   visibilidad, duración, disparador y TTL por patrón. La herramienta no opina sobre ficheros
-   concretos. §4.
-3. **Modelo de dos ejes independientes**: visibilidad (public/private) × duración
+1. **Private encryption**: **`age` in-place, single mechanism** (no backend selector). The separate
+   private repo was discarded as a non-goal for breaking the differentiators. §6.
+2. **User-driven classification**: a `.doctier.yml` where the user decides
+   visibility, lifetime, trigger and TTL per pattern. The tool doesn't opine about specific
+   files. §4.
+3. **Two-independent-axis model**: visibility (public/private) × lifetime
    (durable/ephemeral). §3.
-4. **Alcance del efímero**: solo `worktree` (local, exige `sensitive`); `branch` diseñado pero no
-   implementado, sin selector `default_scope` en el manifiesto. §7.2.
-5. **Distribución**: **CLI standalone en su propio repo** (fuera del arnés). §9.
-6. **Efímero = vida finita, no gitignored**; borrado normal para lo no sensible, y **solo local
-   (nunca commiteado) para lo sensible**, para no dejar rastro en la historia. §7.
-7. **Ecosistema**: **Go**, binario único estático (sin runtime, arranque instantáneo en los
-   filtros clean/smudge, distribución trivial). §9.
-8. **Claves `age`**: **reutilizar las claves SSH** existentes como recipients (age las soporta);
-   `doctier grant` añade una clave y re-cifra (revocar = quitar la línea y re-ejecutar `grant`). §6.
-9. **Disparador `pr-merge`**: comando genérico `doctier gc` invocado desde **CI (primario)** en
-   el evento de merge, con **refuerzo por hook local** y **TTL como red final**. §7.1.
-10. **Manifiesto**: **YAML**, con precedencia **"primera regla que casa"** (orden explícito
-    controlado por el usuario). §4.
+4. **Ephemeral scope**: only `worktree` (local, requires `sensitive`); `branch` designed but not
+   implemented, no `default_scope` selector in the manifest. §7.2.
+5. **Distribution**: **standalone CLI in its own repo** (outside the harness). §9.
+6. **Ephemeral = finite lifetime, not gitignored**; normal deletion for non-sensitive content, and **local-only
+   (never committed) for sensitive content**, so as not to leave a trace in history. §7.
+7. **Ecosystem**: **Go**, single static binary (no runtime, instant startup in the
+   clean/smudge filters, trivial distribution). §9.
+8. **`age` keys**: **reuse the existing SSH keys** as recipients (age supports them);
+   `doctier grant` adds a key and re-encrypts (revoke = remove the line and re-run `grant`). §6.
+9. **`pr-merge` trigger**: generic `doctier gc` command invoked from **CI (primary)** on
+   the merge event, with **local-hook reinforcement** and **TTL as a final net**. §7.1.
+10. **Manifest**: **YAML**, with **"first rule that matches"** precedence (explicit order
+    controlled by the user). §4.
 
-## 14. Detalles de implementación pendientes (fase de prototipo)
+## 14. Pending implementation details (prototype phase)
 
-Ninguna decisión de diseño queda abierta; lo que resta es detalle de construcción:
+No design decision is left open; what remains is construction detail:
 
-- **Nombre definitivo** de la CLI (`doctier` es nombre de trabajo).
-- **Ceremonia de claves `age`**: rotación de la clave de datos al revocar, custodia y flujo de
-  altas/bajas concreto sobre el recipients file.
-- **Detalle del hook local de `pr-merge`**: cómo decidir "esta rama ya está fusionada/desaparecida"
-  de forma robusta (squash merges, ramas remotas borradas). La recolección por CI ya está resuelta
-  con el gating por rama de integración; hay recetas de ejemplo en [`ci/`](ci/) (GitHub Actions,
+- **Final name** of the CLI (`doctier` is a working name).
+- **`age` key ceremony**: rotating the data key on revoke, custody, and the concrete
+  onboarding/offboarding flow over the recipients file.
+- **Detail of the local `pr-merge` hook**: how to robustly decide "this branch is already merged/gone"
+  (squash merges, deleted remote branches). CI-based collection is already solved
+  with the integration-branch gating; there are example recipes in [`ci/`](ci/) (GitHub Actions,
   GitLab CI).
 
 ---
 
-## Apéndice A — Ejemplo de configuración para un consumidor tipo arnés
+## Appendix A — Example configuration for a harness-like consumer
 
-> **No forma parte de la herramienta.** Es solo un ejemplo de cómo *un* proyecto (el arnés)
-> podría clasificar sus documentos. Cada proyecto escribe el suyo. Los valores concretos
-> (p. ej. si `CONTEXT.md` o `qa/report.md` son públicos, privados, duraderos o efímeros) son
-> decisión del usuario de ese proyecto, no de `doctier`.
+> **Not part of the tool.** It's just an example of how *a* project (the harness)
+> might classify its documents. Each project writes its own. The concrete values
+> (e.g. whether `CONTEXT.md` or `qa/report.md` are public, private, durable or ephemeral) are
+> the decision of that project's user, not of `doctier`.
 
 ```yaml
 version: 1
 docs:
-  # Sin regla base: lo no cubierto es public + durable por defecto.
+  # No base rule: anything uncovered is public + durable by default.
 
-  # Estrategia de producto → privada y duradera
+  # Product strategy → private and durable
   - path: ".harness/product/**"
     visibility: private
     lifetime: durable
 
-  # Ingeniería y decisiones → públicas y duraderas (valor por defecto, explícito por claridad)
+  # Engineering and decisions → public and durable (the default value, explicit for clarity)
   - path: ".harness/engineering/**"
     visibility: public
     lifetime: durable
@@ -408,20 +408,20 @@ docs:
     visibility: public
     lifetime: durable
 
-  # Informe de QA → foto puntual; ejemplo como efímero por TTL (el usuario decide)
+  # QA report → point-in-time snapshot; example as ephemeral by TTL (the user decides)
   - path: ".harness/qa/report.md"
     visibility: public
     lifetime: ephemeral
     expire: { on: ttl, ttl_days: 90 }
 
-  # PRD previo a una feature → viaja en la PR y muere al fusionar
+  # Pre-feature PRD → travels in the PR and dies on merge
   - path: ".harness/**/*.prd.md"
     visibility: public
     lifetime: ephemeral
     expire: { on: pr-merge }
 
-  # Notas de prototipo / scratch → sensibles y locales al worktree
-  # (sensitive expira en worktree por defecto)
+  # Prototype / scratch notes → sensitive and local to the worktree
+  # (sensitive expires on worktree by default)
   - path: ".harness/**/_prototype-*"
     visibility: private
     lifetime: ephemeral
