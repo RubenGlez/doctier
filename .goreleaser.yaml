@@ -48,6 +48,15 @@ homebrew_casks:
     commit_author:
       name: goreleaser
       email: goreleaser@users.noreply.github.com
+    # The binary is unsigned/un-notarized (no Apple Developer account), so
+    # Gatekeeper would block it after Homebrew's quarantine. Strip the
+    # quarantine bit post-install, per GoReleaser's documented workaround.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/doctier"]
+          end
     # Don't publish the cask for pre-release tags (e.g. v1.0.0-rc1).
     skip_upload: auto
 
