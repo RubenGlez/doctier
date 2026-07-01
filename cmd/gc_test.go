@@ -64,6 +64,59 @@ docs:
 	}
 }
 
+func TestGCTTLCollectsGitignoredSensitiveFiles(t *testing.T) {
+	// Sensitive ephemerals are gitignored, so git never lists them — the ttl
+	// sweep must find them on disk or the "disk safety net" never fires.
+	root := initRepo(t, `version: 1
+docs:
+  - path: "_scratch/**"
+    visibility: private
+    lifetime: ephemeral
+    sensitive: true
+    expire: { on: ttl, ttl_days: 30 }
+`)
+	write(t, root, ".gitignore", "_scratch/\n")
+	write(t, root, "_scratch/notes.md", "old scratch\n")
+	old := time.Now().AddDate(0, 0, -60)
+	if err := os.Chtimes(filepath.Join(root, "_scratch/notes.md"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGC([]string{"--trigger", "ttl"}); err != nil {
+		t.Fatalf("gc ttl: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "_scratch/notes.md")); !os.IsNotExist(err) {
+		t.Fatalf("ttl must collect a gitignored sensitive file, stat err=%v", err)
+	}
+}
+
+func TestGCTTLSparesUncommittedModifications(t *testing.T) {
+	// git rm refuses a file whose worktree content differs from the index; that
+	// refusal is a protection, and gc must not fall back to a plain delete.
+	root := initRepo(t, `version: 1
+docs:
+  - path: "r.md"
+    visibility: public
+    lifetime: ephemeral
+    expire: { on: ttl, ttl_days: 30 }
+`)
+	write(t, root, "r.md", "old report\n")
+	git(t, root, "add", "-A")
+	old := time.Now().AddDate(0, 0, -60).Format(time.RFC3339)
+	gitEnv(t, root, []string{"GIT_AUTHOR_DATE=" + old, "GIT_COMMITTER_DATE=" + old}, "commit", "-qm", "old")
+	write(t, root, "r.md", "old report\nplus uncommitted work\n")
+
+	if err := runGC([]string{"--trigger", "ttl"}); err != nil {
+		t.Fatalf("gc ttl: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "r.md"))
+	if err != nil {
+		t.Fatal("a ttl-expired file with uncommitted modifications must survive gc")
+	}
+	if string(data) != "old report\nplus uncommitted work\n" {
+		t.Fatal("uncommitted content must be untouched")
+	}
+}
+
 func TestGCTTLKeepsFreshDoc(t *testing.T) {
 	root := initRepo(t, `version: 1
 docs:

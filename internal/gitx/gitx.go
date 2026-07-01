@@ -2,8 +2,10 @@
 package gitx
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -41,9 +43,12 @@ func (e *Error) Error() string {
 // Root returns the top-level directory of the current worktree.
 func Root() (string, error) { return run("rev-parse", "--show-toplevel") }
 
-// StagedFiles lists paths staged for commit (added/copied/modified).
+// StagedFiles lists paths staged for commit (added/copied/modified/renamed).
+// R matters: with rename detection on, a plaintext file moved into a private
+// path shows up as a rename, and skipping it would let it past the pre-commit
+// check.
 func StagedFiles() ([]string, error) {
-	out, err := run("diff", "--cached", "--name-only", "--diff-filter=ACM")
+	out, err := run("diff", "--cached", "--name-only", "--diff-filter=ACMR")
 	if err != nil {
 		return nil, err
 	}
@@ -78,6 +83,65 @@ func StagedBlob(path string) ([]byte, error) {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+// StagedBlobs returns the index content of each path that is present in the
+// index, in a single cat-file process (StagedBlob spawns one per call, which
+// crawls on large trees). Paths not in the index are simply absent from the map.
+func StagedBlobs(paths []string) (map[string][]byte, error) {
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	cmd := exec.Command("git", "cat-file", "--batch")
+	var in bytes.Buffer
+	for _, p := range paths {
+		in.WriteString(":" + p + "\n")
+	}
+	cmd.Stdin = &in
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git cat-file --batch: %v: %s", err, strings.TrimSpace(errb.String()))
+	}
+
+	blobs := make(map[string][]byte, len(paths))
+	r := bufio.NewReader(&out)
+	for _, p := range paths {
+		header, err := r.ReadString('\n')
+		if err != nil {
+			return nil, fmt.Errorf("cat-file --batch: short output: %w", err)
+		}
+		// "<object> missing" (not in the index) or "<oid> <type> <size>". The
+		// object name echoes the input path and may contain spaces, so detect
+		// the missing case by suffix, not by field count.
+		if strings.HasSuffix(strings.TrimSpace(header), " missing") {
+			continue
+		}
+		fields := strings.Fields(header)
+		if len(fields) != 3 {
+			return nil, fmt.Errorf("cat-file --batch: unexpected header %q", strings.TrimSpace(header))
+		}
+		size, err := strconv.ParseInt(fields[2], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("cat-file --batch: bad size in %q", strings.TrimSpace(header))
+		}
+		content := make([]byte, size)
+		if _, err := io.ReadFull(r, content); err != nil {
+			return nil, fmt.Errorf("cat-file --batch: truncated content for %s: %w", p, err)
+		}
+		if _, err := r.ReadString('\n'); err != nil { // trailing LF after content
+			return nil, fmt.Errorf("cat-file --batch: missing terminator for %s: %w", p, err)
+		}
+		blobs[p] = content
+	}
+	return blobs, nil
+}
+
+// IsTracked reports whether path is in the index.
+func IsTracked(path string) bool {
+	out, err := run("ls-files", "--", path)
+	return err == nil && out != ""
 }
 
 // Remove stages the deletion of path from the working tree and index.
@@ -156,6 +220,15 @@ func CurrentBranch() (string, error) {
 func ConfigSet(key, value string) error {
 	_, err := run("config", "--local", key, value)
 	return err
+}
+
+// ConfigGet returns a local git config value, or "" when unset.
+func ConfigGet(key string) string {
+	out, err := run("config", "--local", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return out
 }
 
 // HooksPath returns the effective hooks directory.

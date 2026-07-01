@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -25,9 +26,30 @@ import (
 // ArmorHeader is the first line of an armored age file.
 const ArmorHeader = "-----BEGIN AGE ENCRYPTED FILE-----"
 
-// IsEncrypted reports whether data looks like armored age ciphertext.
+// ageMagic is the first line of the binary age format inside the armor.
+const ageMagic = "age-encryption.org/v1\n"
+
+// IsEncrypted reports whether data looks like armored age ciphertext. It only
+// sniffs the first line — enough to decide whether to *attempt* decryption, but
+// not a guarantee (use ValidCiphertext to verify a blob is really encrypted).
 func IsEncrypted(data []byte) bool {
 	return bytes.HasPrefix(bytes.TrimLeft(data, " \t\r\n"), []byte(ArmorHeader))
+}
+
+// ValidCiphertext reports whether data is, in its entirety, well-formed armored
+// age ciphertext: a single armor block with nothing after it, whose payload is
+// the age v1 format. A prefix sniff is not enough for the fail-closed check —
+// plaintext appended after (or smuggled inside) an armor block must not pass as
+// encrypted.
+func ValidCiphertext(data []byte) bool {
+	if !IsEncrypted(data) {
+		return false
+	}
+	payload, err := io.ReadAll(armor.NewReader(bytes.NewReader(data)))
+	if err != nil {
+		return false // truncated armor, bad base64, or trailing data
+	}
+	return bytes.HasPrefix(payload, []byte(ageMagic))
 }
 
 // LoadRecipients parses an SSH-public-key-per-line recipients file. Blank lines
@@ -101,6 +123,13 @@ func LoadIdentity(keyPath string) (age.Identity, error) {
 func identityFromPEM(pem []byte) (age.Identity, error) {
 	k, err := ssh.ParseRawPrivateKey(pem)
 	if err != nil {
+		// A passphrase-protected key would otherwise fail with an opaque parse
+		// error and the smudge filter would silently fall back to ciphertext;
+		// name the problem so callers can surface it.
+		var missing *ssh.PassphraseMissingError
+		if errors.As(err, &missing) {
+			return nil, fmt.Errorf("ssh key is passphrase-protected; doctier cannot use it non-interactively — point $DOCTIER_SSH_KEY at a passphrase-less key")
+		}
 		return nil, fmt.Errorf("parse ssh key: %w", err)
 	}
 	switch key := k.(type) {

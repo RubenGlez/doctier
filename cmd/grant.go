@@ -11,40 +11,47 @@ import (
 
 // runGrant adds an SSH public key as a recipient and re-encrypts private docs so
 // the new holder can read them. Revoking is the same minus the key: remove the
-// line from the recipients file and re-run (grant with no key re-encrypts).
+// line from the recipients file and re-run `doctier grant` with no argument,
+// which just re-encrypts to the current recipient set.
 func runGrant(args []string) error {
-	if len(args) < 1 {
-		return fmt.Errorf(`grant: usage: doctier grant "<ssh-public-key>"`)
-	}
-	pubkey := strings.TrimSpace(strings.Join(args, " "))
-	if _, err := agessh.ParseRecipient(pubkey); err != nil {
-		return fmt.Errorf("grant: not a valid SSH recipient: %w", err)
-	}
-
 	m, root, err := loadManifest()
 	if err != nil {
 		return err
 	}
-	recFile := recipientsPath(m, root)
 
-	if err := appendRecipient(recFile, pubkey); err != nil {
-		return err
+	if len(args) > 0 {
+		pubkey := strings.TrimSpace(strings.Join(args, " "))
+		if _, err := agessh.ParseRecipient(pubkey); err != nil {
+			return fmt.Errorf("grant: not a valid SSH recipient: %w", err)
+		}
+		if err := appendRecipient(recipientsPath(m, root), pubkey); err != nil {
+			return err
+		}
+		fmt.Printf("✓ added recipient to %s\n", m.RecipientsFile)
 	}
-	fmt.Printf("✓ added recipient to %s\n", m.RecipientsFile)
 
-	// Re-encrypt all private-tracked files to the new recipient set.
+	// Re-encrypt all private-tracked files to the current recipient set. With no
+	// key argument this is the whole command — the revoke flow: remove the line
+	// from the recipients file, then run `doctier grant`.
 	if err := reencryptAll(root); err != nil {
 		return err
 	}
-	fmt.Println("✓ re-encrypted private documents to the new recipient set")
+	fmt.Println("✓ re-encrypted private documents to the current recipient set")
 	fmt.Println("→ review and commit the changes (recipients file + re-encrypted docs)")
+	if len(args) == 0 {
+		fmt.Println("  note: a removed recipient can still read every version already in git history")
+	}
 	return nil
 }
 
 func appendRecipient(recFile, pubkey string) error {
 	existing, _ := os.ReadFile(recFile)
-	if strings.Contains(string(existing), pubkey) {
-		return fmt.Errorf("recipient already present")
+	// Compare whole lines: a substring match would count a commented-out key as
+	// present, and a key line usually ends in a free-form comment field anyway.
+	for _, line := range strings.Split(string(existing), "\n") {
+		if strings.TrimSpace(line) == pubkey {
+			return fmt.Errorf("recipient already present")
+		}
 	}
 	f, err := os.OpenFile(recFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {

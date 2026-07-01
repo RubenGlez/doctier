@@ -17,7 +17,7 @@ func runCheck(args []string) error {
 		return err
 	}
 
-	m, _, err := loadManifest()
+	m, root, err := loadManifest()
 	if err != nil {
 		return err
 	}
@@ -33,6 +33,32 @@ func runCheck(args []string) error {
 	}
 
 	var problems []string
+
+	// If any rule encrypts, the recipients file must be usable — otherwise the
+	// clean filter fails on the next add of a private file.
+	for _, r := range m.Docs {
+		if r.Encrypted() {
+			if _, err := agex.LoadRecipients(recipientsPath(m, root)); err != nil {
+				problems = append(problems, fmt.Sprintf("%s: unusable recipients file: %v", m.RecipientsFile, err))
+			}
+			break
+		}
+	}
+
+	// Fetch every index blob the checks below need in one batch: the per-file
+	// cat-file processes add up on large trees. A path absent from the map is
+	// simply not in the index. LocalOnly and Encrypted are mutually exclusive.
+	var lookup []string
+	for _, f := range files {
+		if rule, ok := m.Match(f); ok && ((rule.LocalOnly() && !*staged) || rule.Encrypted()) {
+			lookup = append(lookup, f)
+		}
+	}
+	blobs, err := gitx.StagedBlobs(lookup)
+	if err != nil {
+		return err
+	}
+
 	for _, f := range files {
 		rule, ok := m.Match(f)
 		if !ok {
@@ -41,22 +67,24 @@ func runCheck(args []string) error {
 			}
 			continue
 		}
-		// Sensitive ephemerals must never be committed.
+		// Sensitive ephemerals must never be committed. In --staged mode the file
+		// list is already staged-only.
 		if rule.LocalOnly() {
-			if isStaged(f, *staged) {
+			if _, inIndex := blobs[f]; *staged || inIndex {
 				problems = append(problems, fmt.Sprintf("%s: sensitive ephemeral must never be committed", f))
 			}
 			continue
 		}
-		// Private tracked files must be encrypted at rest in the index.
+		// Private tracked files must be encrypted at rest in the index. Validate
+		// the whole blob, not just the first line: plaintext appended after an
+		// armor block (or smuggled inside one) must not pass as encrypted.
 		if rule.Encrypted() {
-			blob, err := gitx.StagedBlob(f)
-			if err != nil {
-				// Not staged yet; nothing to verify in the index.
-				continue
+			blob, inIndex := blobs[f]
+			if !inIndex {
+				continue // not staged yet; nothing to verify in the index
 			}
-			if !agex.IsEncrypted(blob) {
-				problems = append(problems, fmt.Sprintf("%s: private file is staged in CLEARTEXT (filter not applied)", f))
+			if !agex.ValidCiphertext(blob) {
+				problems = append(problems, fmt.Sprintf("%s: private file is not valid age ciphertext in the index (cleartext, trailing data, or corrupted armor)", f))
 			}
 		}
 	}
@@ -69,14 +97,4 @@ func runCheck(args []string) error {
 	}
 	fmt.Println("✓ doctier: policy satisfied")
 	return nil
-}
-
-// isStaged reports whether f should be treated as staged. In --staged mode the
-// caller already filtered to staged files; otherwise we consult the index.
-func isStaged(f string, stagedMode bool) bool {
-	if stagedMode {
-		return true
-	}
-	_, err := gitx.StagedBlob(f)
-	return err == nil
 }

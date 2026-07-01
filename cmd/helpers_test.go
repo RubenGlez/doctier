@@ -1,10 +1,15 @@
 package cmd
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // git runs a git command in dir, failing the test on error.
@@ -37,6 +42,21 @@ func initRepo(t *testing.T, manifest string) string {
 	}
 	t.Chdir(root)
 	return root
+}
+
+// pubKeyLine returns a fresh ed25519 SSH public key in authorized_keys format,
+// without the trailing newline.
+func pubKeyLine(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
 }
 
 // write creates a file (and parent dirs) under root.

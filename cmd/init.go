@@ -62,6 +62,12 @@ const preCommitHook = `#!/usr/bin/env sh
 exec doctier check --staged
 `
 
+const prePushHook = `#!/usr/bin/env sh
+# doctier: fail-closed policy check on the full tree before publishing — the
+# reinforcement net for commits made with --no-verify or before 'doctier init'.
+exec doctier check
+`
+
 const postMergeHook = `#!/usr/bin/env sh
 # doctier: collect pr-merge ephemerals after an integrating merge. This is a no-op
 # unless the current branch is the integration branch, so it is safe on a routine
@@ -124,7 +130,8 @@ func runInit(args []string) error {
 
 	fmt.Println("\nNext steps:")
 	fmt.Println("  1. Add recipients:  doctier grant \"$(cat ~/.ssh/id_ed25519.pub)\"")
-	fmt.Println("  2. Edit .doctier.yml to classify your documents.")
+	fmt.Println("  2. Edit .doctier.yml to classify your documents, then re-run")
+	fmt.Println("     'doctier init' to sync .gitattributes/.gitignore with the rules.")
 	fmt.Println("  3. Verify:          doctier check")
 	return nil
 }
@@ -136,10 +143,7 @@ func ensureAttributes(root string, m *config.Manifest) error {
 			lines = append(lines, fmt.Sprintf("%s filter=doctier diff=doctier", r.Path))
 		}
 	}
-	if len(lines) == 0 {
-		return nil
-	}
-	return ensureBlock(filepath.Join(root, ".gitattributes"), "# doctier: encrypt private docs", lines)
+	return ensureBlock(filepath.Join(root, ".gitattributes"), lines)
 }
 
 func ensureIgnores(root string, m *config.Manifest) error {
@@ -149,10 +153,7 @@ func ensureIgnores(root string, m *config.Manifest) error {
 			lines = append(lines, r.Path)
 		}
 	}
-	if len(lines) == 0 {
-		return nil
-	}
-	return ensureBlock(filepath.Join(root, ".gitignore"), "# doctier: sensitive ephemerals (never committed)", lines)
+	return ensureBlock(filepath.Join(root, ".gitignore"), lines)
 }
 
 func configureFilters() error {
@@ -162,7 +163,12 @@ func configureFilters() error {
 	if err := gitx.ConfigSet("filter.doctier.smudge", "doctier filter smudge %f"); err != nil {
 		return err
 	}
-	return gitx.ConfigSet("filter.doctier.required", "true")
+	if err := gitx.ConfigSet("filter.doctier.required", "true"); err != nil {
+		return err
+	}
+	// Readable diffs for key holders. Never enable diff.doctier.cachetextconv:
+	// it would cache the decrypted plaintext in git notes inside the repo.
+	return gitx.ConfigSet("diff.doctier.textconv", "doctier textconv")
 }
 
 func installHooks() error {
@@ -175,6 +181,7 @@ func installHooks() error {
 	}
 	for name, body := range map[string]string{
 		"pre-commit": preCommitHook,
+		"pre-push":   prePushHook,
 		"post-merge": postMergeHook,
 	} {
 		path := filepath.Join(hooks, name)
@@ -198,31 +205,51 @@ func writeIfAbsent(path, content string, perm os.FileMode) (bool, error) {
 	return true, os.WriteFile(path, []byte(content), perm)
 }
 
-// ensureBlock appends a labelled block of lines to a file unless the label is
-// already present. Keeps init idempotent.
-func ensureBlock(path, label string, lines []string) error {
-	existing, _ := os.ReadFile(path)
-	if strings.Contains(string(existing), label) {
-		return nil
-	}
-	var b strings.Builder
-	if len(existing) > 0 && !strings.HasSuffix(string(existing), "\n") {
-		b.WriteString("\n")
-	}
-	b.WriteString("\n" + label + "\n")
-	for _, l := range lines {
-		b.WriteString(l + "\n")
-	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
+// Markers delimit the doctier-managed block in .gitattributes / .gitignore, so
+// re-running init after the rules change regenerates it instead of leaving the
+// first version frozen (a new private rule that never reaches .gitattributes
+// means the filter never runs for it).
+const (
+	blockBegin = "# doctier:begin — managed by 'doctier init', do not edit"
+	blockEnd   = "# doctier:end"
+)
+
+// ensureBlock inserts, replaces or removes the managed block in path so it
+// holds exactly lines. Everything outside the markers is left untouched.
+func ensureBlock(path string, lines []string) error {
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	defer f.Close()
-	_, err = f.WriteString(b.String())
-	if err == nil {
-		fmt.Printf("✓ updated %s\n", filepath.Base(path))
+	content := string(existing)
+
+	var block string
+	if len(lines) > 0 {
+		block = blockBegin + "\n" + strings.Join(lines, "\n") + "\n" + blockEnd + "\n"
 	}
-	return err
+
+	var out string
+	start := strings.Index(content, blockBegin)
+	end := strings.Index(content, blockEnd)
+	switch {
+	case start >= 0 && end > start:
+		rest := strings.TrimPrefix(content[end+len(blockEnd):], "\n")
+		out = content[:start] + block + rest
+	case block == "":
+		return nil // nothing to manage and no stale block to clear
+	case strings.TrimSpace(content) == "":
+		out = block
+	default:
+		out = strings.TrimRight(content, "\n") + "\n\n" + block
+	}
+	if out == content {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+		return err
+	}
+	fmt.Printf("✓ updated %s\n", filepath.Base(path))
+	return nil
 }
 
 func report(created bool, name string) {

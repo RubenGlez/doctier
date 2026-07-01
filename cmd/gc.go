@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/rubenglez/doctier/internal/config"
 	"github.com/rubenglez/doctier/internal/gitx"
 )
@@ -38,6 +40,9 @@ func runGC(args []string) error {
 	var collected int
 
 	if do("ttl") {
+		// Sensitive ephemerals are gitignored, so git never lists them; without
+		// this the ttl "disk safety net" for local-only files would never fire.
+		files = append(files, localOnlyTTLFiles(m, root, files)...)
 		collected += gcTTL(m, root, files, *dry)
 	}
 	if *trigger == "pr-merge" { // opt-in only; never part of "all"
@@ -140,10 +145,38 @@ func gcWorktree(dry bool) {
 	}
 }
 
-// removeFile deletes f, using git rm when tracked so the deletion is staged.
+// localOnlyTTLFiles globs the worktree for files covered by local-only ttl
+// rules, skipping .git and anything git already listed.
+func localOnlyTTLFiles(m *config.Manifest, root string, listed []string) []string {
+	seen := make(map[string]bool, len(listed))
+	for _, f := range listed {
+		seen[f] = true
+	}
+	fsys := os.DirFS(root)
+	var out []string
+	for _, r := range m.Docs {
+		if !r.LocalOnly() || r.Expire == nil || r.Expire.On != "ttl" {
+			continue
+		}
+		matches, _ := doublestar.Glob(fsys, r.Path, doublestar.WithFilesOnly())
+		for _, f := range matches {
+			if seen[f] || f == ".git" || strings.HasPrefix(f, ".git/") {
+				continue
+			}
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// removeFile deletes f: a staged deletion for tracked files, a plain delete for
+// untracked (local-only) ones. When git rm refuses a tracked file — e.g. it has
+// uncommitted modifications — that refusal is a protection, so propagate it
+// instead of deleting the changes unrecoverably.
 func removeFile(f, abs string) error {
-	if err := gitx.Remove(f); err == nil {
-		return nil
+	if gitx.IsTracked(f) {
+		return gitx.Remove(f)
 	}
 	return os.Remove(abs)
 }

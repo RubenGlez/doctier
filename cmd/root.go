@@ -25,8 +25,10 @@ Commands:
   status                   Show the effective classification of each document
   agents [--write]         Emit a tier-aware context block for AGENTS.md / CLAUDE.md
   gc [--trigger T]         Collect expired ephemeral docs (ttl|worktree|pr-merge|all)
-  grant <ssh-pubkey>       Add a recipient and re-encrypt private docs
+  grant [<ssh-pubkey>]     Add a recipient and re-encrypt private docs; with no
+                           key, just re-encrypt to the current set (revoke flow)
   filter clean|smudge <f>  Git clean/smudge filter (invoked by git, not by hand)
+  textconv <f>             Git diff textconv driver (invoked by git, not by hand)
   version                  Print the doctier version
 
 Run "doctier <command> -h" for command flags.
@@ -54,6 +56,8 @@ func Execute(args []string) int {
 		err = runGrant(args[1:])
 	case "filter":
 		err = runFilter(args[1:])
+	case "textconv":
+		err = runTextconv(args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("doctier %s\n", Version)
 		return 0

@@ -3,8 +3,10 @@ package agex_test
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"filippo.io/age"
@@ -78,6 +80,59 @@ func TestIsEncrypted(t *testing.T) {
 	}
 	if agex.IsEncrypted([]byte("# a normal markdown doc")) {
 		t.Error("plain text must not be detected as encrypted")
+	}
+}
+
+func TestValidCiphertext(t *testing.T) {
+	recip, _, _ := keypair(t)
+	ct, err := agex.Encrypt([]byte("secret"), []age.Recipient{recip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agex.ValidCiphertext(ct) {
+		t.Fatal("real ciphertext must validate")
+	}
+	if agex.ValidCiphertext([]byte("# a normal markdown doc")) {
+		t.Fatal("plaintext must not validate")
+	}
+	// Plaintext appended after a valid armor block (the fail-open smudge leaves
+	// ciphertext in the worktree; a keyless user appends notes and commits).
+	hybrid := append(append([]byte{}, ct...), []byte("\nplaintext notes leaked below the armor\n")...)
+	if agex.ValidCiphertext(hybrid) {
+		t.Fatal("armor block with trailing plaintext must not validate")
+	}
+	// A hand-crafted armor block whose payload is not the age format (plaintext
+	// smuggled as base64 between real armor markers).
+	fake := []byte(agex.ArmorHeader + "\nbm90IGFnZSwganVzdCBiYXNlNjQgcGxhaW50ZXh0\n-----END AGE ENCRYPTED FILE-----\n")
+	if agex.ValidCiphertext(fake) {
+		t.Fatal("armor whose payload is not age v1 must not validate")
+	}
+	// The prefix sniff alone must still accept the hybrid (that is its job).
+	if !agex.IsEncrypted(hybrid) {
+		t.Fatal("IsEncrypted is a prefix sniff and should accept the hybrid")
+	}
+}
+
+func TestLoadIdentityPassphraseProtectedKey(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKeyWithPassphrase(priv, "", []byte("hunter2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "id_ed25519")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = agex.LoadIdentity(keyPath)
+	if err == nil {
+		t.Fatal("passphrase-protected key must not load")
+	}
+	if !strings.Contains(err.Error(), "passphrase-protected") {
+		t.Fatalf("error must name the passphrase problem, got: %v", err)
 	}
 }
 

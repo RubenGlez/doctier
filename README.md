@@ -88,8 +88,9 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 | `doctier status` | Show the effective classification of each document. |
 | `doctier agents [--write]` | Emit a tier-aware context block for `AGENTS.md` / `CLAUDE.md` (print, or `--write` to maintain a managed block). |
 | `doctier gc [--trigger ttl\|worktree\|pr-merge\|all]` | Collect expired ephemerals. |
-| `doctier grant "<ssh-pubkey>"` | Add a recipient and re-encrypt private docs. |
+| `doctier grant ["<ssh-pubkey>"]` | Add a recipient and re-encrypt private docs. With no key, just re-encrypt to the current set — the revoke flow: delete the recipient's line, then run `doctier grant`. |
 | `doctier filter clean\|smudge <file>` | Git filter (invoked by git, not by hand). |
+| `doctier textconv <file>` | Git diff driver: `git diff` shows private docs decrypted when a key is present (invoked by git, not by hand). |
 
 ## Install
 
@@ -115,12 +116,16 @@ go install github.com/rubenglez/doctier@latest
 cd your-repo
 doctier init
 doctier grant "$(cat ~/.ssh/id_ed25519.pub)"
-# edit .doctier.yml to classify your docs
+# edit .doctier.yml to classify your docs, then re-run 'doctier init'
+# (it syncs .gitattributes/.gitignore with the rules)
 doctier check
 ```
 
 Decryption uses your SSH private key (`$DOCTIER_SSH_KEY`, else `~/.ssh/id_ed25519`
-or `~/.ssh/id_rsa`).
+or `~/.ssh/id_rsa`). The key must be passphrase-less: git filters cannot prompt,
+so a passphrase-protected key leaves private docs encrypted in your worktree (you
+get a warning on checkout and from `doctier status`). Point `$DOCTIER_SSH_KEY` at
+a dedicated key if your main one has a passphrase.
 
 ## Walkthrough
 
@@ -201,7 +206,8 @@ skill, so they can be refreshed without a doctier release.
 
 ## Fail-closed guarantees
 
-`doctier check` (wired as a pre-commit hook and run in CI) refuses the commit if:
+`doctier check` (wired as pre-commit and pre-push hooks, and run in CI) refuses
+the commit if:
 
 - a `private` file is staged in cleartext (filter not applied),
 - a `sensitive` ephemeral is staged at all,
@@ -222,6 +228,16 @@ never decrypt).
 - `age` ciphertext leaves filenames, sizes and commit metadata visible; the
   content of a deleted tracked-ephemeral remains in git history (use
   `sensitive: true` for material that must leave no trace).
+- **The policy itself is only as trusted as your review process.** `.doctier.yml`
+  and the recipients file are tracked, unauthenticated files: anyone with commit
+  access can reclassify a private path or add their own key. Gate them with
+  CODEOWNERS / required review, and treat any diff to them as a security review.
+- **Revocation is forward-only.** A removed recipient can still decrypt every
+  version already in git history; re-encryption protects future changes only.
+- age has no authenticated associated data: encrypted blobs are not bound to
+  their path or version, so a writer without keys can swap or roll back
+  ciphertexts undetected. See the threat model in
+  [`docs/DESIGN.md`](docs/DESIGN.md) §6.
 - The `pr-merge` trigger is host-specific to detect reliably; `doctier gc` is the
   generic command — wire it from CI (primary), a local hook (reinforcement) and
   rely on `ttl` as the safety net.

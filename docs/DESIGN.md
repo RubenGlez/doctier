@@ -174,8 +174,8 @@ Same repo, `clean/smudge` filter + `.gitattributes`: the stored blob is cipherte
 `smudge` filter decrypts on each checkout (and therefore in each worktree). Keys managed as
 `age` recipients, **reusing the SSH keys** people already have (age supports them), without
 a new-key ceremony. `doctier grant` adds a key to the recipients file and **re-encrypts** the
-affected files; revoke = remove the line from the recipients file + re-run `grant` (re-encrypts to the
-current set). There's no separate `revoke` command.
+affected files; revoke = remove the line from the recipients file + run `doctier grant` with no
+argument (re-encrypts to the current set). There's no separate `revoke` command.
 
 - **Pros**: a single repo, minimal friction; host-agnostic (works even in a public repo);
   atomic history alongside the code; **native worktree compatibility** (travels via checkout,
@@ -210,6 +210,29 @@ or real host-based revocation is ever needed, it would be reevaluated then.
 The primary case is a team repo (private) where the goal is that *not everyone with
 access reads the strategy* and that *it doesn't leak to forks/mirrors*. There `age` wins: less friction,
 one repo, and —decisive here— **native worktree compatibility**.
+
+### Threat model and residual risks
+
+`doctier` protects the **content** of private docs against readers of the repo who hold
+no key. It does not defend against a malicious **writer**:
+
+- **Policy and recipients are in-band.** `.doctier.yml`, the recipients file and
+  `.gitattributes` are tracked, unauthenticated files: anyone with commit access can
+  reclassify a private path as public (the next keyed `git add` then commits plaintext,
+  and `check` approves it because the rule says public) or add their own key and gain
+  read access at the next re-encryption. Protect them with review — CODEOWNERS /
+  required review on `.doctier.yml` and the recipients file — and treat any diff to
+  them as a security review.
+- **No binding of ciphertext to path or version.** age has no authenticated associated
+  data: a writer without keys can swap two encrypted blobs between paths, or resurrect
+  an older ciphertext version, and no key holder gets an integrity error.
+- **Revocation is forward-only.** A removed recipient can still decrypt every version
+  already in git history; re-encryption only protects future changes. Treat a leaked
+  key as a leak of the full history of the docs it could read.
+- **Passphrase-protected SSH keys don't work non-interactively.** The smudge filter
+  cannot prompt for a passphrase; it leaves the file encrypted and warns on stderr
+  (`doctier status` also surfaces it). Use a dedicated passphrase-less key via
+  `$DOCTIER_SSH_KEY`.
 
 ## 7. Ephemeral lifetime: triggers, scope and deletion
 
@@ -301,8 +324,9 @@ with `doctier init`. It doesn't drag per-project script copies around.
 | `doctier status` | Shows the effective classification of each doc and its expiry. |
 | `doctier agents [--write]` | Emits a tier-aware context block for `AGENTS.md`/`CLAUDE.md`. |
 | `doctier gc [--trigger T]` | Purges expired ephemerals (`ttl`/`worktree`/`pr-merge`/`all`). |
-| `doctier grant "<ssh-pubkey>"` | Adds a recipient and re-encrypts private files. To **revoke**: remove the line from the recipients file and re-run `grant` (re-encrypts to the current set). |
+| `doctier grant ["<ssh-pubkey>"]` | Adds a recipient and re-encrypts private files. To **revoke**: remove the line from the recipients file and run `doctier grant` with no argument (re-encrypts to the current set). |
 | `doctier filter clean\|smudge <f>` | Git filter (invoked by git, not by a person). |
+| `doctier textconv <f>` | Git diff textconv driver: `git diff`/`log -p` show private docs decrypted when a key is present (invoked by git, not by a person). |
 
 > `reveal`/`hide` commands (decrypt/encrypt locally to edit) were considered but are **not
 > implemented**: with the smudge filter the working tree is already in cleartext, so they haven't been needed.
@@ -363,7 +387,8 @@ later.
 7. **Ecosystem**: **Go**, single static binary (no runtime, instant startup in the
    clean/smudge filters, trivial distribution). §9.
 8. **`age` keys**: **reuse the existing SSH keys** as recipients (age supports them);
-   `doctier grant` adds a key and re-encrypts (revoke = remove the line and re-run `grant`). §6.
+   `doctier grant` adds a key and re-encrypts (revoke = remove the line and run
+   `doctier grant` with no argument). §6.
 9. **`pr-merge` trigger**: generic `doctier gc` command invoked from **CI (primary)** on
    the merge event, with **local-hook reinforcement** and **TTL as a final net**. §7.1.
 10. **Manifest**: **YAML**, with **"first rule that matches"** precedence (explicit order
