@@ -11,7 +11,7 @@ import (
 
 // recipientsPath resolves the recipients file relative to the repo root.
 func recipientsPath(m *config.Manifest, root string) string {
-	p := m.Visibility.Private.RecipientsFile
+	p := m.RecipientsFile
 	if filepath.IsAbs(p) {
 		return p
 	}

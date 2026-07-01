@@ -37,14 +37,14 @@ docs:
   #   lifetime: ephemeral
   #   sensitive: true
 
-visibility:
-  private:
-    backend: age
-    recipients_file: .doctier/recipients.txt
+# Who can read private (encrypted) docs — an SSH-public-key-per-line file,
+# managed with 'doctier grant'.
+recipients_file: .doctier/recipients.txt
 
-lifetime:
-  ephemeral:
-    default_scope: worktree
+# ephemeral behaviour. integration_branch is where pr-merge ephemerals are
+# collected; omit to auto-detect (origin/HEAD, else main/master).
+# ephemeral:
+#   integration_branch: main
 
 # Optional strictness: refuse to commit any file that matches no rule above,
 # forcing every document to be classified explicitly. Default: allow.

@@ -66,8 +66,7 @@ docs:
     visibility: private
     lifetime: ephemeral
     sensitive: true               # dies with the worktree by default
-visibility:
-  private: { backend: age, recipients_file: .doctier/recipients.txt }
+recipients_file: .doctier/recipients.txt   # who can read private docs
 ```
 
 `doctier` turns each rule into git primitives:
@@ -132,8 +131,7 @@ docs:
     visibility: private
     lifetime: ephemeral
     sensitive: true
-visibility:
-  private: { backend: age, recipients_file: .doctier/recipients.txt }
+recipients_file: .doctier/recipients.txt
 ```
 
 `doctier status` shows the effective classification and where each doc is stored.
@@ -189,7 +187,8 @@ so it is what makes the guarantee hold for every contributor.
 - The `pr-merge` trigger is host-specific to detect reliably; `doctier gc` is the
   generic command — wire it from CI (primary), a local hook (reinforcement) and
   rely on `ttl` as the safety net.
-- Separate-private-repo backend is designed but not yet implemented (age only).
+- Only age encryption is implemented; the separate-private-repo option from the
+  design is not built.
 
 ## License
 

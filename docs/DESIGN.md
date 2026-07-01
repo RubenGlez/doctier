@@ -124,15 +124,14 @@ docs:
     sensitive: true              # nunca se commitea: gitignored + local al worktree (§7.3)
                                  # expire por defecto: on: worktree (se puede fijar ttl)
 
-# Configuración de los backends/ejes
-visibility:
-  private:
-    backend: age                 # por defecto; enchufable (§6): age | git-crypt | repo-separado
-    recipients_file: .doctier/recipients.txt
+# Configuración (claves de nivel superior; nombradas para no colisionar con los
+# ejes por-regla 'visibility' y 'lifetime')
+recipients_file: .doctier/recipients.txt   # quién lee lo privado (grant/revoke)
 
-lifetime:
-  ephemeral:
-    default_scope: worktree      # para 'on: worktree'; configurable (§7.2)
+# ephemeral: integration_branch es dónde se recolectan los efímeros pr-merge;
+# omítelo para autodetectar (origin/HEAD, si no main/master).
+# ephemeral:
+#   integration_branch: main
 
 # Estrictez opcional (por defecto: allow). Si se activa, un doc que no case
 # ninguna regla bloquea el commit, forzando clasificación explícita.
@@ -159,8 +158,12 @@ cambia qué hace `doctier` con ellos.
 ## 6. Nivel privado: backend (decisión: age por defecto, enchufable)
 
 El contenido privado se persiste y comparte con autorizados pero nunca se lee en claro desde el
-repo. El backend es **enchufable** detrás de `visibility.private.backend`, con **`age` por
-defecto**. Comparación de las dos opciones viables:
+repo. El mecanismo de cifrado se diseñó **enchufable**, con **`age`** como opción por defecto.
+Comparación de las dos opciones viables:
+
+> **Prototipo:** el manifiesto **no expone hoy un selector de backend** (solo `age`); se quitó por
+> YAGNI y se reintroduciría al construir un segundo mecanismo. La comparación de abajo documenta la
+> decisión de diseño, no una opción configurable actual.
 
 ### Opción A — Cifrado in-situ (age) · POR DEFECTO
 
@@ -222,18 +225,18 @@ que superan su TTL. Se puede invocar desde hooks, CI o a mano.
 
 ### 7.2 Alcance (decisión: configurable, worktree por defecto)
 
-Para `on: worktree`, la unidad de vida es **configurable** (`lifetime.ephemeral.default_scope:
-worktree|branch`), con **worktree por defecto**:
+Para `on: worktree` se contemplaron dos alcances de vida:
 
-- **`worktree`** (defecto): cada worktree tiene sus efímeros aislados; se van con
+- **`worktree`**: cada worktree tiene sus efímeros aislados; se van con
   `git worktree remove`. Encaja con agentes en paralelo sin colisiones.
 - **`branch`**: se asocian al nombre de rama; se recolectan al fusionar/borrar la rama. Útil sin
   worktrees, pero dos worktrees en la misma rama compartirían efímeros.
 
-> **Prototipo:** `on: worktree` exige `sensitive: true` (local al worktree). Un fichero
-> rastreado vive en la rama, no en un worktree, así que no podría recolectarse con
-> `git worktree remove`. El alcance `branch` está diseñado pero aún no implementado; para
-> efímeros rastreados usa `pr-merge` o `ttl`.
+> **Prototipo:** solo existe el alcance `worktree`, y `on: worktree` exige `sensitive: true`
+> (local al worktree): un fichero rastreado vive en la rama, no en un worktree, así que no
+> podría recolectarse con `git worktree remove`. El alcance `branch` está diseñado pero no
+> implementado, así que el selector `default_scope` se **quitó del manifiesto** (se
+> reintroduciría con `branch`); para efímeros rastreados usa `pr-merge` o `ttl`.
 
 ### 7.3 Borrado y la historia de git (decisión: solo local para lo sensible)
 
@@ -403,14 +406,11 @@ docs:
     expire: { on: pr-merge }
 
   # Notas de prototipo / scratch → sensibles y locales al worktree
+  # (sensitive expira en worktree por defecto)
   - path: ".harness/**/_prototype-*"
     visibility: private
     lifetime: ephemeral
     sensitive: true
-    expire: { on: worktree }
 
-visibility:
-  private: { backend: age, recipients_file: .doctier/recipients.txt }
-lifetime:
-  ephemeral: { default_scope: worktree }
+recipients_file: .doctier/recipients.txt
 ```

@@ -97,7 +97,7 @@ func gcPRMerge(m *config.Manifest, files []string, dry bool) int {
 	// considered merged once the doc is present there. On a feature branch these
 	// ephemerals are still in flight, so collecting would be destructive (e.g. a
 	// post-merge hook firing on a routine `git pull`).
-	integ := m.Lifetime.Ephemeral.IntegrationBranch
+	integ := m.Ephemeral.IntegrationBranch
 	if integ == "" {
 		integ = gitx.DefaultBranch()
 	}

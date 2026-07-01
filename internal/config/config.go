@@ -16,12 +16,16 @@ import (
 )
 
 // Manifest is the parsed .doctier.yml.
+//
+// The two axes (visibility, lifetime) are per-rule fields on Rule; the top-level
+// keys here only carry configuration, and are named so they never collide with a
+// rule's axis fields.
 type Manifest struct {
-	Version    int           `yaml:"version"`
-	Docs       []Rule        `yaml:"docs"`
-	Visibility VisibilityCfg `yaml:"visibility"`
-	Lifetime   LifetimeCfg   `yaml:"lifetime"`
-	Policy     PolicyCfg     `yaml:"policy"`
+	Version        int          `yaml:"version"`
+	Docs           []Rule       `yaml:"docs"`
+	RecipientsFile string       `yaml:"recipients_file"` // SSH-public-key recipients for private docs
+	Ephemeral      EphemeralCfg `yaml:"ephemeral"`
+	Policy         PolicyCfg    `yaml:"policy"`
 }
 
 // Rule maps a glob pattern to a point on both classification axes.
@@ -40,28 +44,14 @@ type Expire struct {
 	Scope   string `yaml:"scope"`    // used when On == "worktree": worktree | branch
 }
 
-type VisibilityCfg struct {
-	Private PrivateCfg `yaml:"private"`
-}
-
-type PrivateCfg struct {
-	Backend        string `yaml:"backend"`         // age (default) | repo-separado
-	RecipientsFile string `yaml:"recipients_file"` // path to age/SSH recipients
-}
-
-type LifetimeCfg struct {
-	Ephemeral EphemeralCfg `yaml:"ephemeral"`
-}
-
 type EphemeralCfg struct {
-	DefaultScope string `yaml:"default_scope"` // worktree (default) | branch
 	// IntegrationBranch is where pr-merge ephemerals are collected. Empty means
 	// auto-detect (origin/HEAD, else main/master).
 	IntegrationBranch string `yaml:"integration_branch"`
 }
 
 type PolicyCfg struct {
-	Uncovered string `yaml:"uncovered"` // block (default) | warn | allow
+	Uncovered string `yaml:"uncovered"` // allow (default) | warn | block
 }
 
 // DefaultPath is where the manifest lives, relative to the repo root.
@@ -85,14 +75,8 @@ func Load(path string) (*Manifest, error) {
 }
 
 func (m *Manifest) applyDefaults() {
-	if m.Visibility.Private.Backend == "" {
-		m.Visibility.Private.Backend = "age"
-	}
-	if m.Visibility.Private.RecipientsFile == "" {
-		m.Visibility.Private.RecipientsFile = ".doctier/recipients.txt"
-	}
-	if m.Lifetime.Ephemeral.DefaultScope == "" {
-		m.Lifetime.Ephemeral.DefaultScope = "worktree"
+	if m.RecipientsFile == "" {
+		m.RecipientsFile = ".doctier/recipients.txt"
 	}
 	if m.Policy.Uncovered == "" {
 		m.Policy.Uncovered = "allow"

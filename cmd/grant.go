@@ -30,7 +30,7 @@ func runGrant(args []string) error {
 	if err := appendRecipient(recFile, pubkey); err != nil {
 		return err
 	}
-	fmt.Printf("✓ added recipient to %s\n", m.Visibility.Private.RecipientsFile)
+	fmt.Printf("✓ added recipient to %s\n", m.RecipientsFile)
 
 	// Re-encrypt all private-tracked files to the new recipient set.
 	if err := reencryptAll(root); err != nil {

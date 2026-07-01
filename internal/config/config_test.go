@@ -126,10 +126,7 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if m.Policy.Uncovered != "allow" {
 		t.Errorf("default policy.uncovered = %q, want allow", m.Policy.Uncovered)
 	}
-	if m.Visibility.Private.Backend != "age" {
-		t.Errorf("default backend = %q, want age", m.Visibility.Private.Backend)
-	}
-	if m.Lifetime.Ephemeral.DefaultScope != "worktree" {
-		t.Errorf("default scope = %q, want worktree", m.Lifetime.Ephemeral.DefaultScope)
+	if m.RecipientsFile != ".doctier/recipients.txt" {
+		t.Errorf("default recipients_file = %q, want .doctier/recipients.txt", m.RecipientsFile)
 	}
 }
