@@ -17,9 +17,7 @@ fail-closed, to let a private doc be committed in cleartext.
 > Status: **early (v0.x), actively developed.** The core — manifest, age clean/smudge
 > filters, fail-closed checks, ephemeral GC — works end-to-end and ships as signed,
 > notarized binaries. Some designed capabilities (e.g. the `branch` ephemeral scope)
-> aren't built yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design and the
-> decisions behind it, and [`docs/STRATEGY.md`](docs/STRATEGY.md) for the value
-> proposition, competitive landscape and roadmap.
+> aren't built yet.
 
 ## Why it exists
 
@@ -241,14 +239,13 @@ never decrypt).
   version already in git history; re-encryption protects future changes only.
 - age has no authenticated associated data: encrypted blobs are not bound to
   their path or version, so a writer without keys can swap or roll back
-  ciphertexts undetected. See the threat model in
-  [`docs/DESIGN.md`](docs/DESIGN.md) §6.
+  ciphertexts undetected.
 - The `pr-merge` trigger is host-specific to detect reliably; `doctier gc` is the
   generic command — wire it from CI (primary), a local hook (reinforcement) and
   rely on `ttl` as the safety net.
 
 Encryption is age-only by design (a separate private-repo backend is an explicit
-non-goal — see [`docs/STRATEGY.md`](docs/STRATEGY.md) §4).
+non-goal).
 
 ## License
 
