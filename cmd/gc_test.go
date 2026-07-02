@@ -38,6 +38,45 @@ docs:
 	}
 }
 
+func TestGCBranchScopeCollection(t *testing.T) {
+	root := initRepo(t, `version: 1
+docs:
+  - path: "**/*.plan.md"
+    visibility: public
+    lifetime: ephemeral
+    expire: { on: worktree, scope: branch }
+`)
+	write(t, root, "f.plan.md", "plan\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "init")
+
+	// Opt-in only: the safe local sweep must leave branch-scoped docs alone.
+	if err := runGC([]string{"--trigger", "all"}); err != nil {
+		t.Fatalf("gc all: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "f.plan.md")); err != nil {
+		t.Fatal("branch-scoped doc must survive the `all` sweep (opt-in only)")
+	}
+
+	// On a feature branch, branch collection must be a no-op (still in flight).
+	git(t, root, "switch", "-c", "feature", "-q")
+	if err := runGC([]string{"--trigger", "branch"}); err != nil {
+		t.Fatalf("gc branch on feature: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "f.plan.md")); err != nil {
+		t.Fatal("branch-scoped doc must survive on a feature branch")
+	}
+
+	// On the integration branch, its branch is considered merged → collect.
+	git(t, root, "switch", "main", "-q")
+	if err := runGC([]string{"--trigger", "branch"}); err != nil {
+		t.Fatalf("gc branch on main: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "f.plan.md")); !os.IsNotExist(err) {
+		t.Fatalf("branch-scoped doc must be collected on the integration branch, stat err=%v", err)
+	}
+}
+
 func TestGCTTLUsesCommitDateNotMtime(t *testing.T) {
 	root := initRepo(t, `version: 1
 docs:

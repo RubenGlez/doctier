@@ -77,6 +77,10 @@ func TestValidate(t *testing.T) {
 		{"bad expire.on", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "someday"}}}}, "expire.on must be"},
 		{"ttl without days", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "ttl"}}}}, "ttl_days > 0"},
 		{"worktree without sensitive", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "ephemeral", Expire: &Expire{On: "worktree"}}}}, "requires sensitive"},
+		{"branch scope tracked", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "worktree", Scope: "branch"}}}}, ""},
+		{"branch scope with sensitive", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "ephemeral", Sensitive: true, Expire: &Expire{On: "worktree", Scope: "branch"}}}}, "tracked, not local"},
+		{"bad scope value", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "worktree", Scope: "repo"}}}}, "expire.scope must be"},
+		{"scope on non-worktree trigger", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "ttl", TTLDays: 5, Scope: "branch"}}}}, "only valid with expire.on=worktree"},
 		{"sensitive on durable", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "durable", Sensitive: true}}}, "sensitive is only valid"},
 		{"sensitive pr-merge", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "ephemeral", Sensitive: true, Expire: &Expire{On: "pr-merge"}}}}, "not pr-merge"},
 		{"unreachable rule", &Manifest{Docs: []Rule{
@@ -98,6 +102,28 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", c.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestBranchScopedAndScopeDefault(t *testing.T) {
+	// A branch-scoped ephemeral is tracked (not local-only) and reports BranchScoped.
+	m := &Manifest{Docs: []Rule{
+		{Path: "**/*.plan.md", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "worktree", Scope: "branch"}},
+		{Path: "**/_scratch/**", Visibility: "private", Lifetime: "ephemeral", Sensitive: true, Expire: &Expire{On: "worktree"}},
+	}}
+	if err := prepare(m); err != nil {
+		t.Fatalf("valid manifest, got %v", err)
+	}
+	branch, scratch := m.Docs[0], m.Docs[1]
+	if !branch.BranchScoped() || branch.LocalOnly() {
+		t.Fatalf("branch-scoped rule: want BranchScoped=true LocalOnly=false, got %v/%v", branch.BranchScoped(), branch.LocalOnly())
+	}
+	if scratch.BranchScoped() {
+		t.Fatal("worktree-scoped sensitive rule must not report BranchScoped")
+	}
+	// An omitted scope on a worktree trigger defaults to worktree.
+	if scratch.Expire.Scope != "worktree" {
+		t.Fatalf("omitted scope should default to worktree, got %q", scratch.Expire.Scope)
 	}
 }
 

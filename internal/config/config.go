@@ -88,6 +88,11 @@ func (m *Manifest) applyDefaults() {
 		if r.Sensitive && r.Lifetime == "ephemeral" && r.Expire == nil {
 			r.Expire = &Expire{On: "worktree"}
 		}
+		// The worktree trigger needs a scope; default it to worktree so
+		// validation and gc can rely on it being set.
+		if r.Expire != nil && r.Expire.On == "worktree" && r.Expire.Scope == "" {
+			r.Expire.Scope = "worktree"
+		}
 	}
 }
 
@@ -120,11 +125,29 @@ func (m *Manifest) validate() error {
 			if r.Expire.On == "ttl" && r.Expire.TTLDays <= 0 {
 				return fmt.Errorf("docs[%d] (%q): ttl expiry requires ttl_days > 0", i, r.Path)
 			}
-			// worktree lifetime is only well-defined for local files: a tracked
-			// file lives in the branch, not a worktree, so it can never be
-			// collected on `git worktree remove`. Require sensitive (local-only).
-			if r.Expire.On == "worktree" && !r.Sensitive {
-				return fmt.Errorf("docs[%d] (%q): expire.on=worktree requires sensitive:true (a tracked file lives in the branch, not a worktree)", i, r.Path)
+			// scope selects the lifetime binding for the worktree trigger; it is
+			// meaningless for the others.
+			if r.Expire.On != "worktree" && r.Expire.Scope != "" {
+				return fmt.Errorf("docs[%d] (%q): expire.scope is only valid with expire.on=worktree", i, r.Path)
+			}
+			if r.Expire.On == "worktree" {
+				switch r.Expire.Scope {
+				case "worktree":
+					// Collected on `git worktree remove`, which only works for a
+					// local file: a tracked file lives in the branch, not a
+					// worktree, so it could never be collected there.
+					if !r.Sensitive {
+						return fmt.Errorf("docs[%d] (%q): expire.scope=worktree requires sensitive:true (a tracked file lives in the branch, not a worktree)", i, r.Path)
+					}
+				case "branch":
+					// Tracked and collected when its branch merges; a local
+					// (never-committed) file has no branch identity in git.
+					if r.Sensitive {
+						return fmt.Errorf("docs[%d] (%q): expire.scope=branch is tracked, not local; remove sensitive:true", i, r.Path)
+					}
+				default:
+					return fmt.Errorf("docs[%d] (%q): expire.scope must be worktree|branch, got %q", i, r.Path, r.Expire.Scope)
+				}
 			}
 		default:
 			return fmt.Errorf("docs[%d] (%q): lifetime must be durable|ephemeral, got %q", i, r.Path, r.Lifetime)
@@ -192,4 +215,11 @@ func (r Rule) Encrypted() bool {
 // local to the worktree). Only sensitive ephemerals are local-only.
 func (r Rule) LocalOnly() bool {
 	return r.Lifetime == "ephemeral" && r.Sensitive
+}
+
+// BranchScoped reports whether the document is a tracked ephemeral collected
+// when its feature branch merges (expire.on=worktree, scope=branch).
+func (r Rule) BranchScoped() bool {
+	return r.Lifetime == "ephemeral" && r.Expire != nil &&
+		r.Expire.On == "worktree" && r.Expire.Scope == "branch"
 }

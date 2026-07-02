@@ -17,11 +17,12 @@ import (
 //
 //	ttl       delete files past their ttl_days (by mtime)
 //	pr-merge  stage deletion of tracked pr-merge ephemerals (for post-merge/CI)
+//	branch    stage deletion of tracked branch-scoped ephemerals whose branch merged
 //	worktree  prune bookkeeping for removed worktrees
-//	all       ttl + worktree (the safe local sweep; pr-merge is opt-in)
+//	all       ttl + worktree (the safe local sweep; pr-merge and branch are opt-in)
 func runGC(args []string) error {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
-	trigger := fs.String("trigger", "all", "ttl|worktree|pr-merge|all")
+	trigger := fs.String("trigger", "all", "ttl|worktree|pr-merge|branch|all")
 	dry := fs.Bool("dry-run", false, "show what would be collected without deleting")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -47,6 +48,9 @@ func runGC(args []string) error {
 	}
 	if *trigger == "pr-merge" { // opt-in only; never part of "all"
 		collected += gcPRMerge(m, files, *dry)
+	}
+	if *trigger == "branch" { // opt-in only; never part of "all"
+		collected += gcBranch(m, files, *dry)
 	}
 	if do("worktree") {
 		gcWorktree(*dry)
@@ -98,27 +102,42 @@ func gcTTL(m *config.Manifest, root string, files []string, dry bool) int {
 }
 
 func gcPRMerge(m *config.Manifest, files []string, dry bool) int {
-	// pr-merge collection only runs on the integration branch: a doc's PR is
-	// considered merged once the doc is present there. On a feature branch these
-	// ephemerals are still in flight, so collecting would be destructive (e.g. a
-	// post-merge hook firing on a routine `git pull`).
+	return gcOnIntegration(m, files, dry, "pr-merge", func(r config.Rule) bool {
+		return r.Expire.On == "pr-merge"
+	})
+}
+
+// gcBranch collects branch-scoped ephemerals (expire.on=worktree, scope=branch):
+// tracked docs that should disappear once their feature branch merges. Collection
+// reuses the same integration-branch detection as pr-merge — a merged branch's doc
+// is present on the integration branch.
+func gcBranch(m *config.Manifest, files []string, dry bool) int {
+	return gcOnIntegration(m, files, dry, "branch", config.Rule.BranchScoped)
+}
+
+// gcOnIntegration stages deletion of tracked ephemerals (matching want) that have
+// reached the integration branch. It only runs there: a doc's branch is considered
+// merged once the doc is present on the integration branch. On a feature branch
+// these ephemerals are still in flight, so collecting would be destructive (e.g. a
+// post-merge hook firing on a routine `git pull`). Shared by pr-merge and branch.
+func gcOnIntegration(m *config.Manifest, files []string, dry bool, label string, want func(config.Rule) bool) int {
 	integ := m.Ephemeral.IntegrationBranch
 	if integ == "" {
 		integ = gitx.DefaultBranch()
 	}
 	cur, err := gitx.CurrentBranch()
 	if err != nil || cur != integ {
-		fmt.Printf("  pr-merge: skipped — not on integration branch %q (on %q)\n", integ, cur)
+		fmt.Printf("  %s: skipped — not on integration branch %q (on %q)\n", label, integ, cur)
 		return 0
 	}
 
 	n := 0
 	for _, f := range files {
 		rule, ok := m.Match(f)
-		if !ok || rule.Lifetime != "ephemeral" || rule.Expire == nil || rule.Expire.On != "pr-merge" {
+		if !ok || rule.Lifetime != "ephemeral" || rule.Expire == nil || !want(rule) {
 			continue
 		}
-		fmt.Printf("  pr-merge-expired: %s\n", f)
+		fmt.Printf("  %s-expired: %s\n", label, f)
 		n++
 		if dry {
 			continue
@@ -128,7 +147,7 @@ func gcPRMerge(m *config.Manifest, files []string, dry bool) int {
 		}
 	}
 	if n > 0 && !dry {
-		fmt.Println("  → staged deletions; commit them to complete pr-merge collection")
+		fmt.Printf("  → staged deletions; commit them to complete %s collection\n", label)
 	}
 	return n
 }

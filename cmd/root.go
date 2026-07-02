@@ -24,7 +24,7 @@ Commands:
   check [--staged]         Verify the staged (or working) tree against the policy (fail-closed)
   status                   Show the effective classification of each document
   agents [--write]         Emit a tier-aware context block for AGENTS.md / CLAUDE.md
-  gc [--trigger T]         Collect expired ephemeral docs (ttl|worktree|pr-merge|all)
+  gc [--trigger T]         Collect expired ephemeral docs (ttl|worktree|pr-merge|branch|all)
   grant [<ssh-pubkey>]     Add a recipient and re-encrypt private docs; with no
                            key, just re-encrypt to the current set (revoke flow)
   filter clean|smudge <f>  Git clean/smudge filter (invoked by git, not by hand)
