@@ -20,3 +20,9 @@ Read these for project context:
 - `.harness/product/product.md`
 - `.harness/product/roadmap.md`
 <!-- doctier:end -->
+
+## Working in this repo
+
+- This repo self-hosts doctier: its own `.harness/` docs are tracked **encrypted**. Reading them requires an age/SSH key configured as a recipient; without a key they appear as ciphertext.
+- Build: `go build ./...`. Test: `go test ./...`.
+- Releases are cut by pushing a `v*` tag (goreleaser). macOS binaries are Developer ID signed and notarized in CI.
