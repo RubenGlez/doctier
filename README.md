@@ -14,10 +14,12 @@ turns each rule into the right git mechanism (plaintext tracking, an age
 clean/smudge filter, scheduled deletion, or a gitignored local file) and refuses,
 fail-closed, to let a private doc be committed in cleartext.
 
-> Status: **prototype**. The core — manifest, age clean/smudge filters, fail-closed
-> checks, ephemeral GC — works end-to-end. See [`docs/DESIGN.md`](docs/DESIGN.md)
-> for the full design and the decisions behind it, and [`docs/STRATEGY.md`](docs/STRATEGY.md)
-> for the value proposition, competitive landscape and roadmap.
+> Status: **early (v0.x), actively developed.** The core — manifest, age clean/smudge
+> filters, fail-closed checks, ephemeral GC — works end-to-end and ships as signed,
+> notarized binaries. Some designed capabilities (e.g. the `branch` ephemeral scope)
+> aren't built yet. See [`docs/DESIGN.md`](docs/DESIGN.md) for the full design and the
+> decisions behind it, and [`docs/STRATEGY.md`](docs/STRATEGY.md) for the value
+> proposition, competitive landscape and roadmap.
 
 ## Why it exists
 
@@ -109,6 +111,9 @@ curl -fsSL https://raw.githubusercontent.com/RubenGlez/doctier/main/install.sh |
 # With Go installed
 go install github.com/rubenglez/doctier@latest
 ```
+
+macOS binaries are signed with a Developer ID certificate and notarized by Apple, so
+Gatekeeper runs them without a security prompt.
 
 ## Quick start
 
@@ -223,7 +228,7 @@ so it is what makes the guarantee hold for every contributor. CI also drives the
 and [GitLab CI](docs/ci/gitlab-ci.yml); neither needs your age key (check and gc
 never decrypt).
 
-## Known limitations (prototype)
+## Known limitations
 
 - `age` ciphertext leaves filenames, sizes and commit metadata visible; the
   content of a deleted tracked-ephemeral remains in git history (use
