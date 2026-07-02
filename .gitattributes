@@ -1,9 +1,3 @@
-/doctier
-/doctier-bin
-*.test
-/dist/
-
 # doctier:begin — managed by 'doctier init', do not edit
-**/_prototype-*
-**/_spike/**
+.harness/** filter=doctier diff=doctier
 # doctier:end
