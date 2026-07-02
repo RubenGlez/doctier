@@ -16,8 +16,8 @@ fail-closed, to let a private doc be committed in cleartext.
 
 > Status: **early (v0.x), actively developed.** The core — manifest, age clean/smudge
 > filters, fail-closed checks, ephemeral GC — works end-to-end and ships as signed,
-> notarized binaries. Some designed capabilities (e.g. the `branch` ephemeral scope)
-> aren't built yet.
+> notarized binaries. Some designed capabilities (e.g. work-state-aware `doctier agents`
+> filtering that emits only the docs relevant to the current work state) aren't built yet.
 
 ## Why it exists
 
@@ -87,7 +87,7 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 | `doctier check [--staged]` | Fail-closed policy check (for pre-commit/pre-push and CI). |
 | `doctier status` | Show the effective classification of each document. |
 | `doctier agents [--write]` | Emit a tier-aware context block for `AGENTS.md` / `CLAUDE.md` (print, or `--write` to maintain a managed block). |
-| `doctier gc [--trigger ttl\|worktree\|pr-merge\|all]` | Collect expired ephemerals. |
+| `doctier gc [--trigger ttl\|worktree\|pr-merge\|branch\|all]` | Collect expired ephemerals. |
 | `doctier grant ["<ssh-pubkey>"]` | Add a recipient and re-encrypt private docs. With no key, just re-encrypt to the current set — the revoke flow: delete the recipient's line, then run `doctier grant`. |
 | `doctier filter clean\|smudge <file>` | Git filter (invoked by git, not by hand). |
 | `doctier textconv <file>` | Git diff driver: `git diff` shows private docs decrypted when a key is present (invoked by git, not by hand). |
