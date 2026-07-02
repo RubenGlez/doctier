@@ -21,6 +21,7 @@ Read these for project context:
 - `.harness/product/competitors.md`
 - `.harness/product/product.md`
 - `.harness/product/roadmap.md`
+- `.harness/qa/report.md`
 <!-- doctier:end -->
 
 ## Working in this repo
