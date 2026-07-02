@@ -15,7 +15,9 @@ Read these for project context:
 - `.harness/adr/0008-reuse-ssh-keys-as-age-recipients.md`
 - `.harness/adr/0009-pr-merge-via-generic-gc.md`
 - `.harness/adr/0010-yaml-first-match-manifest.md`
+- `.harness/adr/0011-branch-ephemeral-scope.md`
 - `.harness/engineering/architecture.md`
+- `.harness/engineering/features/branch-ephemeral-scope.md`
 - `.harness/product/competitors.md`
 - `.harness/product/product.md`
 - `.harness/product/roadmap.md`
