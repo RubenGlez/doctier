@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"filippo.io/age/agessh"
+	"github.com/rubenglez/doctier/internal/config"
+	"github.com/rubenglez/doctier/internal/gitx"
 )
 
 // runGrant adds an SSH public key as a recipient and re-encrypts private docs so
@@ -33,7 +35,7 @@ func runGrant(args []string) error {
 	// Re-encrypt all private-tracked files to the current recipient set. With no
 	// key argument this is the whole command — the revoke flow: remove the line
 	// from the recipients file, then run `doctier grant`.
-	if err := reencryptAll(root); err != nil {
+	if err := reencryptAll(m, root); err != nil {
 		return err
 	}
 	fmt.Println("✓ re-encrypted private documents to the current recipient set")
@@ -67,10 +69,26 @@ func appendRecipient(recFile, pubkey string) error {
 	return err
 }
 
-// reencryptAll forces the clean filter to re-run over the whole tree so private
-// files are re-encrypted to the current recipients.
-func reencryptAll(root string) error {
-	cmd := exec.Command("git", "add", "--renormalize", ".")
+// reencryptAll forces the clean filter to re-run over the private-tracked files
+// so they are re-encrypted to the current recipients. It scopes the renormalize
+// to those pathspecs rather than `git add --renormalize .`, which would sweep the
+// user's unrelated dirty worktree into the recipients commit.
+func reencryptAll(m *config.Manifest, root string) error {
+	files, err := gitx.TrackedFiles()
+	if err != nil {
+		return err
+	}
+	var paths []string
+	for _, f := range files {
+		if rule, ok := m.Match(f); ok && rule.Encrypted() {
+			paths = append(paths, f)
+		}
+	}
+	if len(paths) == 0 {
+		return nil
+	}
+	args := append([]string{"add", "--renormalize", "--"}, paths...)
+	cmd := exec.Command("git", args...)
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "DOCTIER_FORCE_ENCRYPT=1")
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr

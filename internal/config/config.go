@@ -175,6 +175,11 @@ func (m *Manifest) validate() error {
 		}
 		// Unreachable rule: an earlier pattern already covers this one, so with
 		// first-match-wins this rule can never fire (a dangerous silent misclass).
+		// This is a HEURISTIC: it tests the earlier pattern against the later one as
+		// a literal path, so it catches whole-rule shadowing (identical or prefix
+		// patterns) but not *partial* overlap — e.g. an earlier `**/*.md` before a
+		// later `docs/**` is not flagged, yet every .md under docs/ takes the earlier
+		// rule. Treat a clean load as "no obvious dead rule", not a proof of coverage.
 		for j := 0; j < i; j++ {
 			if ok, _ := doublestar.Match(m.Docs[j].Path, r.Path); ok {
 				return fmt.Errorf("docs[%d] (%q) is unreachable: earlier rule docs[%d] (%q) already matches it (first-match-wins)", i, r.Path, j, m.Docs[j].Path)

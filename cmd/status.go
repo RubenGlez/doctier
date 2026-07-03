@@ -23,12 +23,21 @@ func runStatus(args []string) error {
 	}
 	sort.Strings(files)
 
+	tracked, err := gitx.TrackedFiles()
+	if err != nil {
+		return err
+	}
+	isTracked := make(map[string]bool, len(tracked))
+	for _, f := range tracked {
+		isTracked[f] = true
+	}
+
 	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(w, "DOCUMENT\tVISIBILITY\tLIFETIME\tSTORAGE\tEXPIRES")
 	for _, f := range files {
 		rule, _ := m.Effective(f)
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			f, rule.Visibility, rule.Lifetime, storage(rule), expiry(rule))
+			f, rule.Visibility, rule.Lifetime, storage(rule, isTracked[f]), expiry(rule))
 	}
 	if err := w.Flush(); err != nil {
 		return err
@@ -60,10 +69,17 @@ func warnCloneSetup(m *config.Manifest) {
 	}
 }
 
-func storage(r config.Rule) string {
+func storage(r config.Rule, tracked bool) string {
 	switch {
 	case r.LocalOnly():
 		return "local (gitignored)"
+	case !tracked:
+		// Not in git yet. Report where it WILL land on the next add, not a present
+		// state it does not have.
+		if r.Encrypted() {
+			return "untracked (will encrypt)"
+		}
+		return "untracked"
 	case r.Encrypted():
 		return "git (encrypted)"
 	default:

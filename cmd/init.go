@@ -98,9 +98,16 @@ func runInit(args []string) error {
 	}
 	report(created, config.DefaultPath)
 
-	// 2. Recipients file
-	recRel := ".doctier/recipients.txt"
-	if err := os.MkdirAll(filepath.Join(root, ".doctier"), 0o755); err != nil {
+	// 2. Load manifest so we can derive attributes/ignores/recipients from the rules.
+	m, err := config.Load(filepath.Join(root, config.DefaultPath))
+	if err != nil {
+		return err
+	}
+
+	// 3. Recipients file — at the path the manifest declares (default
+	// .doctier/recipients.txt), so init and grant agree on which file holds keys.
+	recRel := m.RecipientsFile
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, recRel)), 0o755); err != nil {
 		return err
 	}
 	created, err = writeIfAbsent(filepath.Join(root, recRel), recipientsTemplate, 0o644)
@@ -108,12 +115,6 @@ func runInit(args []string) error {
 		return err
 	}
 	report(created, recRel)
-
-	// 3. Load manifest so we can derive attributes/ignores from the rules.
-	m, err := config.Load(filepath.Join(root, config.DefaultPath))
-	if err != nil {
-		return err
-	}
 
 	// 4. .gitattributes for private-tracked rules
 	if err := ensureAttributes(root, m); err != nil {
@@ -372,10 +373,18 @@ func ensureBlock(path string, lines []string) error {
 
 	var out string
 	start := strings.Index(content, blockBegin)
-	end := strings.Index(content, blockEnd)
 	switch {
-	case start >= 0 && end > start:
-		rest := strings.TrimPrefix(content[end+len(blockEnd):], "\n")
+	case start >= 0:
+		// Splice at the FIRST begin marker, using the end marker that follows it.
+		// Searching for end relative to begin (not globally) means a stray/corrupted
+		// end before begin can't leave end < begin and send us down the append path,
+		// which would duplicate the managed block. If no end follows begin, treat
+		// everything from begin to EOF as the corrupt block and replace it.
+		tail := content[start+len(blockBegin):]
+		var rest string
+		if rel := strings.Index(tail, blockEnd); rel >= 0 {
+			rest = strings.TrimPrefix(tail[rel+len(blockEnd):], "\n")
+		}
 		out = content[:start] + block + rest
 	case block == "":
 		return nil // nothing to manage and no stale block to clear

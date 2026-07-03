@@ -243,6 +243,23 @@ never decrypt).
 - The `pr-merge` trigger is host-specific to detect reliably; `doctier gc` is the
   generic command — wire it from CI (primary), a local hook (reinforcement) and
   rely on `ttl` as the safety net.
+- **`pr-merge` and `branch` collect by presence, not by a real merge event.** Both
+  mean "this ephemeral is now on the integration branch", so a doc committed
+  directly to `main` (trunk-based flow) is collected on the next run there — even
+  seconds later. They are two spellings of the same collection path, differing only
+  in the manifest vocabulary (`expire.on: pr-merge` vs `expire.scope: branch`).
+- **`gc --trigger worktree` only prunes stale worktree bookkeeping.** Worktree-scoped
+  `sensitive` files are removed by `git worktree remove` itself; this trigger does
+  not delete them.
+- **Pre-push / CI `check --push` validates the pushed tip trees, not every commit in
+  the range.** Cleartext introduced and then removed in an intermediate commit of the
+  same push is not inspected; only the tips are. Plaintext already in pushed history
+  needs `git filter-repo` to scrub.
+- **`LoadIdentity` needs a passphrase-less private key** (no ssh-agent or age-native
+  identity support), which pushes toward keeping an unencrypted key on disk.
+- **Windows is built but untested.** Release binaries ship for windows/amd64+arm64,
+  but the hooks are `sh` scripts and `install.sh` excludes Windows; hook behavior
+  under Git-for-Windows `sh` is assumed, not verified.
 
 Encryption is age-only by design (a separate private-repo backend is an explicit
 non-goal).

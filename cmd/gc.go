@@ -27,6 +27,13 @@ func runGC(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// A typo'd trigger (e.g. --trigger pr_merge) must not silently match nothing
+	// and print success — a cron/CI job would then never collect, forever.
+	switch *trigger {
+	case "ttl", "worktree", "pr-merge", "branch", "all":
+	default:
+		return fmt.Errorf("unknown --trigger %q (want ttl|worktree|pr-merge|branch|all)", *trigger)
+	}
 
 	m, root, err := loadManifest()
 	if err != nil {

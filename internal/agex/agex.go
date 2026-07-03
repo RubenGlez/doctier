@@ -10,6 +10,8 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -50,6 +52,65 @@ func ValidCiphertext(data []byte) bool {
 		return false // truncated armor, bad base64, or trailing data
 	}
 	return bytes.HasPrefix(payload, []byte(ageMagic))
+}
+
+// RecipientTags returns the set of recipient-stanza tags in an armored age
+// header. For an SSH recipient the tag (the stanza's first argument) is age's
+// ssh fingerprint, so recipient coverage is checkable from the ciphertext alone —
+// no private key needed. Returns an error only when the armor cannot be read.
+func RecipientTags(ciphertext []byte) (map[string]bool, error) {
+	payload, err := io.ReadAll(armor.NewReader(bytes.NewReader(ciphertext)))
+	if err != nil {
+		return nil, err
+	}
+	tags := make(map[string]bool)
+	sc := bufio.NewScanner(bytes.NewReader(payload))
+	for sc.Scan() {
+		line := sc.Text()
+		// The header ends at the HMAC line ("--- <mac>"); stop before scanning the
+		// binary body, whose bytes could otherwise resemble a stanza line.
+		if line == "---" || strings.HasPrefix(line, "--- ") {
+			break
+		}
+		if strings.HasPrefix(line, "-> ") {
+			if fields := strings.Fields(line); len(fields) >= 3 {
+				tags[fields[2]] = true
+			}
+		}
+	}
+	return tags, sc.Err()
+}
+
+// SSHRecipientTag returns age's recipient-stanza tag for an SSH authorized-keys
+// line: base64 of the first four bytes of SHA-256 over the marshaled public key.
+// This mirrors age/agessh so a recipient can be matched against a blob's stanzas.
+func SSHRecipientTag(pubkeyLine string) (string, error) {
+	pk, _, _, _, err := ssh.ParseAuthorizedKey([]byte(pubkeyLine))
+	if err != nil {
+		return "", fmt.Errorf("parse recipient %q: %w", pubkeyLine, err)
+	}
+	sum := sha256.Sum256(pk.Marshal())
+	return base64.RawStdEncoding.EncodeToString(sum[:4]), nil
+}
+
+// RecipientLines returns the raw recipient lines (non-blank, non-comment) from a
+// recipients file, in order. Used to report coverage by the exact key text.
+func RecipientLines(path string) ([]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open recipients: %w", err)
+	}
+	defer f.Close()
+	var lines []string
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines, sc.Err()
 }
 
 // LoadRecipients parses an SSH-public-key-per-line recipients file. Blank lines
