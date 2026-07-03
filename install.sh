@@ -50,7 +50,7 @@ url="https://github.com/${REPO}/releases/download/v${version}/${asset}"
 # --- choose an install dir we can actually write to ---
 dest="${DOCTIER_INSTALL:-}"
 if [ -z "$dest" ]; then
-	if [ -w /usr/local/bin ] 2>/dev/null; then
+	if [ -w /usr/local/bin ]; then
 		dest="/usr/local/bin"
 	else
 		dest="${HOME}/.local/bin"

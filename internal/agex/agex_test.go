@@ -160,3 +160,53 @@ func TestLoadRecipients(t *testing.T) {
 		t.Fatal("a recipients file with no keys must error")
 	}
 }
+
+// TestRecipientTagsMatchCurrentRecipients checks that the stanza tag age writes
+// for a recipient equals SSHRecipientTag of that recipient's public line, and
+// that a non-recipient's tag is absent — the basis for keyless coverage checks (M3).
+func TestRecipientTagsMatchCurrentRecipients(t *testing.T) {
+	recip, _, aLine := keypair(t)
+	_, _, bLine := keypair(t) // a different key, NOT a recipient of the blob
+
+	ct, err := agex.Encrypt([]byte("secret"), []age.Recipient{recip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags, err := agex.RecipientTags(ct)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	aTag, err := agex.SSHRecipientTag(aLine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tags[aTag] {
+		t.Fatalf("blob must carry the stanza tag of its recipient (%s); tags=%v", aTag, tags)
+	}
+	bTag, err := agex.SSHRecipientTag(bLine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tags[bTag] {
+		t.Fatal("a non-recipient's tag must not appear in the blob header")
+	}
+}
+
+// TestLoadIdentityInlinePEM verifies the headless path: a key provided inline
+// via $DOCTIER_IDENTITY (PEM material, not a file path) loads as an identity.
+func TestLoadIdentityInlinePEM(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOCTIER_SSH_KEY", "")
+	t.Setenv("DOCTIER_IDENTITY", string(pem.EncodeToMemory(block)))
+	if _, err := agex.LoadIdentity(""); err != nil {
+		t.Fatalf("inline PEM identity should load: %v", err)
+	}
+}

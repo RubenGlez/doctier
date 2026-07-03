@@ -27,6 +27,13 @@ func runGC(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	// A typo'd trigger (e.g. --trigger pr_merge) must not silently match nothing
+	// and print success — a cron/CI job would then never collect, forever.
+	switch *trigger {
+	case "ttl", "worktree", "pr-merge", "branch", "all":
+	default:
+		return fmt.Errorf("unknown --trigger %q (want ttl|worktree|pr-merge|branch|all)", *trigger)
+	}
 
 	m, root, err := loadManifest()
 	if err != nil {
@@ -75,10 +82,16 @@ func gcTTL(m *config.Manifest, root string, files []string, dry bool) int {
 			continue
 		}
 		abs := filepath.Join(root, f)
-		// Prefer the last commit date (survives clones/checkouts); fall back to
-		// filesystem mtime for local-only files that are never committed.
+		// Prefer the last commit date (survives clones/checkouts). Fall back to
+		// filesystem mtime ONLY for local-only (sensitive, never-committed) files —
+		// those legitimately have no commit history. For a tracked-rule file with
+		// no commit history (e.g. a fresh `cp -p`/`rsync -a` copy that carries an
+		// old mtime), deleting by mtime would destroy data git never had, so skip.
 		ref, err := gitx.LastCommitTime(f)
 		if err != nil {
+			if !rule.LocalOnly() {
+				continue
+			}
 			info, statErr := os.Stat(abs)
 			if statErr != nil {
 				continue
@@ -94,7 +107,7 @@ func gcTTL(m *config.Manifest, root string, files []string, dry bool) int {
 		if dry {
 			continue
 		}
-		if err := removeFile(f, abs); err != nil {
+		if err := removeFile(f, abs, root); err != nil {
 			fmt.Fprintf(os.Stderr, "  ! failed to remove %s: %v\n", f, err)
 		}
 	}
@@ -189,13 +202,38 @@ func localOnlyTTLFiles(m *config.Manifest, root string, listed []string) []strin
 	return out
 }
 
-// removeFile deletes f: a staged deletion for tracked files, a plain delete for
-// untracked (local-only) ones. When git rm refuses a tracked file — e.g. it has
-// uncommitted modifications — that refusal is a protection, so propagate it
-// instead of deleting the changes unrecoverably.
-func removeFile(f, abs string) error {
+// removeFile collects f: a staged deletion for tracked files (recoverable from
+// git), and a reversible quarantine for untracked (local-only) ones. When git rm
+// refuses a tracked file — e.g. it has uncommitted modifications — that refusal
+// is a protection, so propagate it instead of deleting the changes unrecoverably.
+func removeFile(f, abs, root string) error {
 	if gitx.IsTracked(f) {
 		return gitx.Remove(f)
 	}
-	return os.Remove(abs)
+	// Untracked file: git has no copy, so an unlink would be unrecoverable. Move
+	// it into a quarantine dir instead — reversible, and a second gc sweep (or the
+	// user) can purge it later.
+	return quarantine(abs, root, f)
+}
+
+// quarantine moves an untracked file into .doctier/trash/, preserving its
+// relative path, instead of unlinking it. The dir is gitignored by init.
+func quarantine(abs, root, rel string) error {
+	dest := filepath.Join(root, ".doctier", "trash", rel)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(abs, dest); err != nil {
+		// Cross-device or other rename failure: fall back to copy+remove so the
+		// file still leaves its ttl-covered location, but never lose it silently.
+		data, readErr := os.ReadFile(abs)
+		if readErr != nil {
+			return readErr
+		}
+		if writeErr := os.WriteFile(dest, data, 0o600); writeErr != nil {
+			return writeErr
+		}
+		return os.Remove(abs)
+	}
+	return nil
 }
