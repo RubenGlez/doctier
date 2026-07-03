@@ -103,6 +103,16 @@ func (m *Manifest) validate() error {
 		return fmt.Errorf("policy.uncovered must be allow|warn|block, got %q", m.Policy.Uncovered)
 	}
 	for i, r := range m.Docs {
+		// A malformed glob must fail loudly. doublestar.Match swallows pattern
+		// errors as "no match", so an unvalidated typo like "docs/[strategy/**"
+		// would silently match nothing — turning a private rule into a plaintext
+		// (public) one with no signal.
+		if r.Path == "" {
+			return fmt.Errorf("docs[%d]: path must not be empty", i)
+		}
+		if !doublestar.ValidatePattern(r.Path) {
+			return fmt.Errorf("docs[%d] (%q): invalid glob pattern", i, r.Path)
+		}
 		switch r.Visibility {
 		case "public", "private":
 		default:

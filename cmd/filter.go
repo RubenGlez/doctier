@@ -52,14 +52,30 @@ func runFilter(args []string) error {
 }
 
 func clean(m *config.Manifest, root, file string, plaintext []byte) ([]byte, error) {
-	// Guard against double-encryption: if the input is already age ciphertext
-	// (e.g. a keyless checkout left ciphertext in the working tree via the
-	// fail-open smudge, and the file is being re-added), pass it through
-	// unchanged instead of encrypting it again and corrupting it. The whole blob
-	// must validate: a mere armor-header prefix would let plaintext appended
-	// below the block ride through to the index unencrypted.
+	force := os.Getenv("DOCTIER_FORCE_ENCRYPT") != ""
+	// Handle ciphertext input (e.g. a keyless checkout left ciphertext in the
+	// working tree via the fail-open smudge, and the file is being re-added). The
+	// whole blob must validate: a mere armor-header prefix would let plaintext
+	// appended below the block ride through to the index unencrypted.
 	if agex.ValidCiphertext(plaintext) {
-		return plaintext, nil
+		if !force {
+			// Normal add: pass through unchanged rather than double-encrypting.
+			return plaintext, nil
+		}
+		// Forced re-encryption (grant / revoke to a changed recipient set) MUST
+		// actually re-key the blob. Passing the old ciphertext through would leave
+		// a revoked recipient able to read it while grant prints "re-encrypted" —
+		// a silent security failure. Decrypt first, then fall through to encrypt to
+		// the current recipients; failing to obtain a key is fatal (fail closed).
+		id, err := agex.LoadIdentity("")
+		if err != nil {
+			return nil, fmt.Errorf("re-encrypt %s: a readable key is required to re-encrypt existing ciphertext: %w", file, err)
+		}
+		pt, err := agex.Decrypt(plaintext, id)
+		if err != nil {
+			return nil, fmt.Errorf("re-encrypt %s: %w", file, err)
+		}
+		plaintext = pt
 	}
 	recipients, err := agex.LoadRecipients(recipientsPath(m, root))
 	if err != nil {
@@ -70,7 +86,7 @@ func clean(m *config.Manifest, root, file string, plaintext []byte) ([]byte, err
 	// ciphertext decrypts to the same plaintext, reuse it verbatim.
 	// grant sets DOCTIER_FORCE_ENCRYPT to bypass reuse when the recipient set
 	// changes and files must actually be re-encrypted.
-	if os.Getenv("DOCTIER_FORCE_ENCRYPT") == "" {
+	if !force {
 		if existing := reuseCiphertext(file, plaintext); existing != nil {
 			return existing, nil
 		}

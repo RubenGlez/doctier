@@ -1,10 +1,14 @@
 package cmd
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/rubenglez/doctier/internal/agex"
+	"github.com/rubenglez/doctier/internal/config"
 	"github.com/rubenglez/doctier/internal/gitx"
 )
 
@@ -13,6 +17,7 @@ import (
 func runCheck(args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	staged := fs.Bool("staged", false, "check staged files only (default: all listed files)")
+	push := fs.Bool("push", false, "validate the trees of commits being pushed (reads pre-push stdin)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -20,6 +25,13 @@ func runCheck(args []string) error {
 	m, root, err := loadManifest()
 	if err != nil {
 		return err
+	}
+
+	// Pre-push mode validates what is actually being published (the pushed commit
+	// trees) rather than the current index — the index may have been fixed since
+	// the offending commit, or the pushed branch may not even be checked out.
+	if *push {
+		return checkPush(m, root)
 	}
 
 	var files []string
@@ -97,4 +109,64 @@ func runCheck(args []string) error {
 	}
 	fmt.Println("✓ doctier: policy satisfied")
 	return nil
+}
+
+// checkPush reads the pre-push stdin protocol
+// ("<localref> <localsha> <remoteref> <remotesha>" per line) and verifies that
+// every private path in each pushed tip tree is stored as valid ciphertext.
+// Branch deletions (all-zero local sha) are skipped.
+func checkPush(m *config.Manifest, root string) error {
+	sc := bufio.NewScanner(os.Stdin)
+	seen := make(map[string]bool)
+	var problems []string
+	for sc.Scan() {
+		fields := strings.Fields(sc.Text())
+		if len(fields) < 4 {
+			continue
+		}
+		localSHA := fields[1]
+		if strings.Trim(localSHA, "0") == "" {
+			continue // branch deletion — nothing pushed
+		}
+		if seen[localSHA] {
+			continue
+		}
+		seen[localSHA] = true
+		problems = append(problems, checkTree(m, localSHA)...)
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	if len(problems) > 0 {
+		for _, p := range problems {
+			fmt.Printf("  ✗ %s\n", p)
+		}
+		return fmt.Errorf("%d policy violation(s) in pushed commits", len(problems))
+	}
+	fmt.Println("✓ doctier: pushed commits satisfy policy")
+	return nil
+}
+
+// checkTree verifies the private paths in a single commit/tree are encrypted.
+func checkTree(m *config.Manifest, ref string) []string {
+	files, err := gitx.TreeFiles(ref)
+	if err != nil {
+		return []string{fmt.Sprintf("%s: cannot read tree: %v", ref[:min(len(ref), 12)], err)}
+	}
+	var problems []string
+	for _, f := range files {
+		rule, ok := m.Match(f)
+		if !ok || !rule.Encrypted() {
+			continue
+		}
+		blob, err := gitx.TreeBlob(ref, f)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("%s@%s: cannot read blob: %v", f, ref[:min(len(ref), 12)], err))
+			continue
+		}
+		if !agex.ValidCiphertext(blob) {
+			problems = append(problems, fmt.Sprintf("%s@%s: private file is cleartext in a pushed commit", f, ref[:min(len(ref), 12)]))
+		}
+	}
+	return problems
 }

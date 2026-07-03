@@ -1,0 +1,38 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # Dogfood the policy: doctier's own private docs must be encrypted at rest.
+      # The repo ships them as ciphertext, so this passes without any key — a key
+      # is only needed to READ them, not to verify they are encrypted.
+      - name: doctier check
+        run: |
+          go build -o /tmp/doctier .
+          /tmp/doctier check

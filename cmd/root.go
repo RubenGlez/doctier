@@ -21,12 +21,14 @@ Usage:
 
 Commands:
   init                     Scaffold .doctier.yml, .gitattributes, hooks and filters
-  check [--staged]         Verify the staged (or working) tree against the policy (fail-closed)
+  check [--staged|--push]  Verify staged / working tree / pushed commits against the policy (fail-closed)
   status                   Show the effective classification of each document
   agents [--write]         Emit a tier-aware context block for AGENTS.md / CLAUDE.md
   gc [--trigger T]         Collect expired ephemeral docs (ttl|worktree|pr-merge|branch|all)
   grant [<ssh-pubkey>]     Add a recipient and re-encrypt private docs; with no
                            key, just re-encrypt to the current set (revoke flow)
+  unlock                   Decrypt all private files into the working tree (needs a key)
+  cat <path>               Print one private file's plaintext to stdout (needs a key)
   filter clean|smudge <f>  Git clean/smudge filter (invoked by git, not by hand)
   textconv <f>             Git diff textconv driver (invoked by git, not by hand)
   version                  Print the doctier version
@@ -54,6 +56,10 @@ func Execute(args []string) int {
 		err = runGC(args[1:])
 	case "grant":
 		err = runGrant(args[1:])
+	case "unlock":
+		err = runUnlock(args[1:])
+	case "cat":
+		err = runCat(args[1:])
 	case "filter":
 		err = runFilter(args[1:])
 	case "textconv":

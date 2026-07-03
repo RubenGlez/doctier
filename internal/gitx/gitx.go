@@ -15,6 +15,17 @@ import (
 // run executes git with args and returns stdout, trimmed. stderr is folded into
 // the error so callers get a useful message.
 func run(args ...string) (string, error) {
+	out, err := runRaw(args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// runRaw is like run but returns stdout untrimmed. Use it for -z NUL-delimited
+// output, where trimming would be wrong (a path may legitimately contain
+// trailing whitespace, and the records are separated by NUL, not newline).
+func runRaw(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
@@ -26,7 +37,7 @@ func run(args ...string) (string, error) {
 		}
 		return "", err
 	}
-	return strings.TrimSpace(out.String()), nil
+	return out.String(), nil
 }
 
 // Error carries the failing git invocation for readable diagnostics.
@@ -48,29 +59,54 @@ func Root() (string, error) { return run("rev-parse", "--show-toplevel") }
 // path shows up as a rename, and skipping it would let it past the pre-commit
 // check.
 func StagedFiles() ([]string, error) {
-	out, err := run("diff", "--cached", "--name-only", "--diff-filter=ACMR")
+	// -z: NUL-delimited, which also turns OFF core.quotepath. Without it, git
+	// C-quotes any path with non-ASCII bytes (e.g. `"caf\303\251.md"`), and that
+	// quoted string matches no manifest rule — a private file would read as
+	// uncovered and slip past the fail-closed check.
+	out, err := runRaw("diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR")
 	if err != nil {
 		return nil, err
 	}
-	return splitLines(out), nil
+	return splitZ(out), nil
 }
 
 // ListFiles lists tracked and untracked (non-ignored) files.
 func ListFiles() ([]string, error) {
-	out, err := run("ls-files", "--cached", "--others", "--exclude-standard")
+	out, err := runRaw("ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, err
 	}
-	return splitLines(out), nil
+	return splitZ(out), nil
 }
 
 // TrackedFiles lists tracked files only.
 func TrackedFiles() ([]string, error) {
-	out, err := run("ls-files")
+	out, err := runRaw("ls-files", "-z")
 	if err != nil {
 		return nil, err
 	}
-	return splitLines(out), nil
+	return splitZ(out), nil
+}
+
+// TreeFiles lists the paths in a commit/tree (recursively), NUL-delimited so
+// non-ASCII names are not quoted.
+func TreeFiles(ref string) ([]string, error) {
+	out, err := runRaw("ls-tree", "-r", "--name-only", "-z", ref)
+	if err != nil {
+		return nil, err
+	}
+	return splitZ(out), nil
+}
+
+// TreeBlob returns the content of path in the given commit/tree.
+func TreeBlob(ref, path string) ([]byte, error) {
+	cmd := exec.Command("git", "cat-file", "blob", ref+":"+path)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
 }
 
 // StagedBlob returns the staged (index) content of path, or an error if the
@@ -231,6 +267,20 @@ func ConfigGet(key string) string {
 	return out
 }
 
+// ConfigGetAny returns a git config value from any scope (system/global/local),
+// or "" when unset. Used to detect an inherited override such as a global
+// core.hooksPath.
+func ConfigGetAny(key string) string {
+	out, err := run("config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return out
+}
+
+// GitDir returns the absolute path to the repository's .git directory.
+func GitDir() (string, error) { return run("rev-parse", "--absolute-git-dir") }
+
 // HooksPath returns the effective hooks directory.
 func HooksPath() (string, error) {
 	if p, err := run("config", "--local", "core.hooksPath"); err == nil && p != "" {
@@ -248,4 +298,14 @@ func splitLines(s string) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
+}
+
+// splitZ splits NUL-delimited git output (from -z), dropping the trailing empty
+// record git emits after the final NUL.
+func splitZ(s string) []string {
+	s = strings.TrimRight(s, "\x00")
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, "\x00")
 }

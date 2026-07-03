@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/rubenglez/doctier/internal/agex"
 	"github.com/rubenglez/doctier/internal/config"
 	"github.com/rubenglez/doctier/internal/gitx"
 )
@@ -57,21 +59,27 @@ const recipientsTemplate = `# doctier recipients — one SSH public key per line
 #   ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... alice@example.com
 `
 
+// Every hook guards on the manifest first: if these ever run in a repo without a
+// .doctier.yml (e.g. installed into a shared/global hooks dir), they no-op
+// instead of blocking every commit with "read manifest: no such file".
 const preCommitHook = `#!/usr/bin/env sh
 # doctier: fail-closed policy check on staged files.
+[ -f .doctier.yml ] || exit 0
 exec doctier check --staged
 `
 
 const prePushHook = `#!/usr/bin/env sh
-# doctier: fail-closed policy check on the full tree before publishing — the
+# doctier: fail-closed policy check on the commits being pushed — the
 # reinforcement net for commits made with --no-verify or before 'doctier init'.
-exec doctier check
+[ -f .doctier.yml ] || exit 0
+exec doctier check --push
 `
 
 const postMergeHook = `#!/usr/bin/env sh
 # doctier: collect pr-merge ephemerals after an integrating merge. This is a no-op
 # unless the current branch is the integration branch, so it is safe on a routine
 # 'git pull' of a feature branch.
+[ -f .doctier.yml ] || exit 0
 exec doctier gc --trigger pr-merge
 `
 
@@ -128,26 +136,148 @@ func runInit(args []string) error {
 		return err
 	}
 
+	// 8. Re-sync: catch tracked files that a (possibly newly added) private rule
+	// now covers but that are still plaintext in the index, and re-encrypt them.
+	if err := resyncPrivate(root, m); err != nil {
+		return err
+	}
+
 	fmt.Println("\nNext steps:")
 	fmt.Println("  1. Add recipients:  doctier grant \"$(cat ~/.ssh/id_ed25519.pub)\"")
 	fmt.Println("  2. Edit .doctier.yml to classify your documents, then re-run")
 	fmt.Println("     'doctier init' to sync .gitattributes/.gitignore with the rules.")
 	fmt.Println("  3. Verify:          doctier check")
+	fmt.Println("\nHeadless / CI / agent runs (no interactive key):")
+	fmt.Println("  • grant a dedicated key:  doctier grant \"<ci-agent-pubkey>\"")
+	fmt.Println("  • provide it at runtime:  export DOCTIER_IDENTITY=\"$(cat ci_key)\"  (path or inline PEM)")
+	fmt.Println("  • decrypt the worktree:   doctier unlock     (or read one file: doctier cat <path>)")
 	return nil
+}
+
+// resyncPrivate finds tracked files that match an encrypted rule but are stored
+// as plaintext in the index (e.g. a file committed before its rule was added, or
+// reclassified public→private) and re-encrypts them. Without this, reclassifying
+// an existing file leaves plaintext riding in the index past the pre-commit gate.
+func resyncPrivate(root string, m *config.Manifest) error {
+	files, err := gitx.TrackedFiles()
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for _, f := range files {
+		rule, ok := m.Match(f)
+		if !ok || !rule.Encrypted() {
+			continue
+		}
+		blob, err := gitx.StagedBlob(f)
+		if err != nil {
+			continue
+		}
+		if !agex.ValidCiphertext(blob) {
+			stale = append(stale, f)
+		}
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	fmt.Printf("\n! %d tracked file(s) match a private rule but are plaintext in git:\n", len(stale))
+	for _, f := range stale {
+		fmt.Printf("    %s\n", f)
+	}
+	// Only auto-fix when recipients are configured; otherwise the clean filter
+	// would fail. Print the exact remediation instead.
+	if _, err := agex.LoadRecipients(recipientsPath(m, root)); err != nil {
+		fmt.Println("  Add a recipient first (doctier grant …), then re-run 'doctier init' to re-encrypt them.")
+		fmt.Println("  NOTE: prior commits keep the plaintext; scrub history with git filter-repo if needed.")
+		return nil
+	}
+	fmt.Println("  Re-encrypting them now (git add --renormalize)…")
+	fmt.Println("  NOTE: prior commits keep the plaintext; scrub history with git filter-repo if needed.")
+	args := append([]string{"add", "--renormalize", "--"}, stale...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = root
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 func ensureAttributes(root string, m *config.Manifest) error {
 	var lines []string
 	for _, r := range m.Docs {
 		if r.Visibility == "private" && !r.LocalOnly() {
-			lines = append(lines, fmt.Sprintf("%s filter=doctier diff=doctier", r.Path))
+			// git parses .gitattributes patterns with fnmatch/gitignore rules — it
+			// does NOT expand doublestar brace alternations like {a,b}. Writing such
+			// a pattern verbatim produces a dead line: the filter never attaches and
+			// the "encrypted" file commits as plaintext. Expand braces into one
+			// concrete gitattributes pattern per alternative so every path the rule
+			// covers actually gets filter=doctier.
+			for _, pat := range expandBraces(r.Path) {
+				lines = append(lines, fmt.Sprintf("%s filter=doctier diff=doctier", pat))
+			}
 		}
 	}
 	return ensureBlock(filepath.Join(root, ".gitattributes"), lines)
 }
 
+// expandBraces expands a single level of doublestar brace alternation
+// ("a/{x,y}/b" -> ["a/x/b","a/y/b"]) so patterns are expressible in the
+// brace-less gitattributes dialect. Patterns with no braces pass through
+// unchanged. Nested braces are expanded recursively.
+func expandBraces(pattern string) []string {
+	open := strings.IndexByte(pattern, '{')
+	if open < 0 {
+		return []string{pattern}
+	}
+	// Find the matching close brace for this open, honoring nesting.
+	depth, close := 0, -1
+	for i := open; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				close = i
+			}
+		}
+		if close >= 0 {
+			break
+		}
+	}
+	if close < 0 {
+		return []string{pattern} // unbalanced; leave as-is (validation catches it)
+	}
+	prefix, suffix := pattern[:open], pattern[close+1:]
+	var out []string
+	for _, alt := range splitTopLevel(pattern[open+1 : close]) {
+		out = append(out, expandBraces(prefix+alt+suffix)...)
+	}
+	return out
+}
+
+// splitTopLevel splits on commas that are not inside a nested brace group.
+func splitTopLevel(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, s[start:])
+}
+
 func ensureIgnores(root string, m *config.Manifest) error {
-	var lines []string
+	// Always ignore the gc quarantine dir so recovered ttl files are never
+	// accidentally committed.
+	lines := []string{".doctier/trash/"}
 	for _, r := range m.Docs {
 		if r.LocalOnly() {
 			lines = append(lines, r.Path)
@@ -172,9 +302,21 @@ func configureFilters() error {
 }
 
 func installHooks() error {
-	hooks, err := gitx.HooksPath()
+	gitDir, err := gitx.GitDir()
 	if err != nil {
 		return err
+	}
+	hooks := filepath.Join(gitDir, "hooks")
+	// If an external (e.g. global) core.hooksPath is active, git would ignore this
+	// repo's own hooks dir — and writing doctier's hooks into the shared dir would
+	// make every OTHER repo run them (they no-op via the manifest guard, but it is
+	// still surprising and can clobber a user's global hooks). Pin a repo-local
+	// core.hooksPath so doctier's hooks stay scoped to this repository.
+	if external := gitx.ConfigGetAny("core.hooksPath"); external != "" && gitx.ConfigGet("core.hooksPath") == "" {
+		if err := gitx.ConfigSet("core.hooksPath", hooks); err != nil {
+			return err
+		}
+		fmt.Printf("• pinned core.hooksPath to %s (a global override was active)\n", hooks)
 	}
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		return err

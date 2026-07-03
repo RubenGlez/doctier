@@ -84,10 +84,23 @@ func LoadRecipients(path string) ([]age.Recipient, error) {
 }
 
 // LoadIdentity loads an SSH private key as an age identity for decryption.
-// If keyPath is empty it tries $DOCTIER_SSH_KEY, then the usual default keys.
+// Resolution order when keyPath is empty: $DOCTIER_SSH_KEY, then $DOCTIER_IDENTITY,
+// then the usual default keys (~/.ssh/id_ed25519, ~/.ssh/id_rsa).
+//
+// The value may be either a filesystem path OR inline PEM key material. Inline
+// material matters for headless/agent runs: CI and cloud-agent secrets are
+// injected as values, not files, so `DOCTIER_IDENTITY="$(cat key)"` must work
+// without the caller first writing a temp file. Anything containing a PEM header
+// is treated as key bytes, everything else as a path.
 func LoadIdentity(keyPath string) (age.Identity, error) {
 	if keyPath == "" {
 		keyPath = os.Getenv("DOCTIER_SSH_KEY")
+	}
+	if keyPath == "" {
+		keyPath = os.Getenv("DOCTIER_IDENTITY")
+	}
+	if strings.Contains(keyPath, "-----BEGIN") {
+		return identityFromPEM([]byte(keyPath))
 	}
 	candidates := []string{keyPath}
 	if keyPath == "" {

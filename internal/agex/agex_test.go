@@ -160,3 +160,21 @@ func TestLoadRecipients(t *testing.T) {
 		t.Fatal("a recipients file with no keys must error")
 	}
 }
+
+// TestLoadIdentityInlinePEM verifies the headless path: a key provided inline
+// via $DOCTIER_IDENTITY (PEM material, not a file path) loads as an identity.
+func TestLoadIdentityInlinePEM(t *testing.T) {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOCTIER_SSH_KEY", "")
+	t.Setenv("DOCTIER_IDENTITY", string(pem.EncodeToMemory(block)))
+	if _, err := agex.LoadIdentity(""); err != nil {
+		t.Fatalf("inline PEM identity should load: %v", err)
+	}
+}
