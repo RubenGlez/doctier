@@ -28,4 +28,4 @@ Read these for project context:
 
 - This repo self-hosts doctier: its own `.harness/` docs are tracked **encrypted**. Reading them requires an age/SSH key configured as a recipient; without a key they appear as ciphertext.
 - Build: `go build ./...`. Test: `go test ./...`.
-- Releases are cut by pushing a `v*` tag (goreleaser). macOS binaries are Developer ID signed and notarized in CI.
+- Releases are cut by pushing a `v*` tag (goreleaser). The release job runs on a **macOS runner** so the darwin binaries are signed with Apple's real `codesign` and notarized with `notarytool` (see `scripts/macos-sign.sh`). This is deliberate: GoReleaser's built-in quill notarizer signs on Linux, but quill's signature is rejected by Apple Silicon's kernel at exec (`Killed: 9`) even after Apple notarizes it. Signing needs the `MACOS_SIGN_P12` / `MACOS_SIGN_PASSWORD` and `MACOS_NOTARY_*` repo secrets; without them the build falls back to the Go linker's ad-hoc signature (runs locally, not Gatekeeper-trusted).

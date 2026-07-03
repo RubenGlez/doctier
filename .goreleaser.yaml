@@ -20,24 +20,15 @@ builds:
     ldflags:
       - -s -w -X github.com/rubenglez/doctier/cmd.Version={{ .Version }}
     mod_timestamp: "{{ .CommitTimestamp }}"
-
-# Sign the macOS binaries with a Developer ID Application cert and notarize them
-# with Apple, so Gatekeeper trusts them without the quarantine-strip workaround.
-# Runs on the Linux release runner via GoReleaser's built-in quill; no Mac needed.
-# Gated on the signing cert being present, so local snapshot builds and any run
-# without the secrets simply skip notarization instead of failing.
-notarize:
-  macos:
-    - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
-      sign:
-        certificate: "{{ .Env.MACOS_SIGN_P12 }}"
-        password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
-      notarize:
-        issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
-        key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
-        key: "{{ .Env.MACOS_NOTARY_KEY }}"
-        wait: true
-        timeout: 20m
+    # Sign (and notarize) the darwin binaries with Apple's real codesign +
+    # notarytool. This MUST run on a macOS runner: GoReleaser's built-in quill
+    # notarizer signs on Linux, but quill's signature is rejected by Apple
+    # Silicon's kernel at exec (Killed: 9) even after Apple notarizes it. The hook
+    # no-ops for non-darwin targets and for local snapshot builds without a cert.
+    hooks:
+      post:
+        - cmd: ./scripts/macos-sign.sh "{{ .Path }}" "{{ .Os }}"
+          output: true
 
 archives:
   - formats:

@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   goreleaser:
-    runs-on: ubuntu-latest
+    # macOS runner is REQUIRED: the darwin binaries are signed with Apple's real
+    # codesign + notarytool (see scripts/macos-sign.sh). Signing on Linux via
+    # GoReleaser's quill produces a signature Apple Silicon's kernel rejects at
+    # exec (Killed: 9), even though Apple notarizes it.
+    runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -22,6 +26,37 @@ jobs:
         with:
           go-version: stable
 
+      - name: Import Developer ID certificate
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MACOS_SIGN_P12:-}" ]; then
+            echo "No signing cert configured; darwin binaries will keep the Go linker ad-hoc signature."
+            exit 0
+          fi
+          keychain="$RUNNER_TEMP/build.keychain-db"
+          keychain_pw="$(openssl rand -base64 24)"
+          security create-keychain -p "$keychain_pw" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_pw" "$keychain"
+          echo "$MACOS_SIGN_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_SIGN_PASSWORD" \
+            -T /usr/bin/codesign
+          # Let codesign use the imported key without an interactive prompt.
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_pw" "$keychain" >/dev/null
+          # Put our keychain first in the search list so codesign finds the identity.
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | sed s/\"//g)
+          identity="$(security find-identity -v -p codesigning "$keychain" \
+            | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')"
+          if [ -z "$identity" ]; then
+            echo "::error::Developer ID Application identity not found in the imported cert"; exit 1
+          fi
+          echo "Imported signing identity: $identity"
+          echo "MACOS_SIGN_IDENTITY=$identity" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/cert.p12"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
@@ -29,11 +64,10 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing + notarization. Absent until the repo secrets are set;
-          # the goreleaser notarize block is gated on MACOS_SIGN_P12, so releases
-          # without these still succeed (just unsigned).
-          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
-          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          # Signing identity resolved from the imported cert above (empty => the
+          # build hook leaves the Go linker ad-hoc signature and skips notarization).
+          MACOS_SIGN_IDENTITY: ${{ env.MACOS_SIGN_IDENTITY }}
+          # App Store Connect API key for notarytool (see scripts/macos-sign.sh).
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
