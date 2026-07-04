@@ -1,5 +1,7 @@
 # doctier
 
+[![latest release](https://img.shields.io/github/v/release/RubenGlez/doctier)](https://github.com/RubenGlez/doctier/releases/latest)
+
 **Tiered privacy and lifecycle for generated documents, over git.** Works with any coding agent or workflow.
 
 `doctier` is a single static Go binary that classifies the documents a project
