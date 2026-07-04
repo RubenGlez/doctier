@@ -4,6 +4,8 @@
 
 **Tiered privacy and lifecycle for generated documents, over git.** Works with any coding agent or workflow.
 
+**Project page:** [rubenglez.dev/doctier](https://rubenglez.dev/doctier)
+
 `doctier` is a single static Go binary that classifies the documents a project
 generates along **two independent axes** and enforces that classification
 automatically, using nothing but git primitives:
