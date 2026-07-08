@@ -16,11 +16,13 @@ Read these for project context:
 - `.harness/adr/0009-pr-merge-via-generic-gc.md`
 - `.harness/adr/0010-yaml-first-match-manifest.md`
 - `.harness/adr/0011-branch-ephemeral-scope.md`
+- `.harness/adr/0012-macos-native-codesign-on-macos-runner.md`
 - `.harness/engineering/architecture.md`
 - `.harness/engineering/features/branch-ephemeral-scope.md`
 - `.harness/product/competitors.md`
 - `.harness/product/product.md`
 - `.harness/product/roadmap.md`
+- `.harness/qa/adversarial-audit-2026-07-03.md`
 - `.harness/qa/report.md`
 <!-- doctier:end -->
 
