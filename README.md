@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/banner.svg" alt="doctier — tiered privacy and lifecycle for generated documents, over git: public or age-encrypted, durable or ephemeral" width="830">
+</p>
+
 # doctier
 
 [![latest release](https://img.shields.io/github/v/release/RubenGlez/doctier)](https://github.com/RubenGlez/doctier/releases/latest)
