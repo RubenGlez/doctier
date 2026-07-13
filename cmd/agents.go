@@ -23,15 +23,19 @@ const (
 // discovery convention agents already auto-load. It lists only the documents the
 // user explicitly classified (so it skips source code, which is uncovered) and
 // only those that are readable now (a private doc left as ciphertext for want of
-// a key is skipped). doctier does not expose tiers to the agent; it curates the
-// index that the convention surfaces.
+// a key is skipped). Ephemerals are further filtered to the current work state
+// (see inFlight) unless --all is given. doctier does not expose tiers to the
+// agent; it curates the index that the convention surfaces.
 func runAgents(args []string) error {
-	fs := newFlagSet("agents", `usage: doctier agents [--write] [--file AGENTS.md]
+	fs := newFlagSet("agents", `usage: doctier agents [--write] [--file AGENTS.md] [--all]
 
 Emit a tier-aware context block listing the classified, currently-readable
-docs — print it, or --write to maintain a managed block in the target file.`)
+docs — print it, or --write to maintain a managed block in the target file.
+Ephemerals are listed only while in flight for the current work unit (a stale
+plan read as authoritative is worse than no plan); --all lists every one.`)
 	write := fs.Bool("write", false, "insert/update the managed block in the target file instead of printing it")
 	file := fs.String("file", "AGENTS.md", "target file for --write")
+	all := fs.Bool("all", false, "include ephemerals from other or finished work units")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -45,7 +49,11 @@ docs — print it, or --write to maintain a managed block in the target file.`)
 		return err
 	}
 
-	durable, ephemeral := classifiedDocs(m, root, files)
+	var includeEphemeral func(string) bool
+	if !*all {
+		includeEphemeral = inFlight(m)
+	}
+	durable, ephemeral := classifiedDocs(m, root, files, includeEphemeral)
 	block := renderBlock(durable, ephemeral)
 	if *write {
 		return writeBlock(root, *file, block)
@@ -54,9 +62,47 @@ docs — print it, or --write to maintain a managed block in the target file.`)
 	return nil
 }
 
+// inFlight returns the work-state predicate for ephemerals: a doc belongs to
+// the CURRENT work unit when it is untracked (local work here) or tracked but
+// not yet present on the integration branch (it travels with this feature
+// branch). On the integration branch itself every tracked ephemeral has, by
+// definition, finished its work unit — it is awaiting collection, and a later
+// agent reading it as authoritative is exactly the doc-rot the lifetime axis
+// exists to prevent. When the integration branch cannot be resolved the
+// predicate includes everything: context listing is not a security surface,
+// so it fails open.
+func inFlight(m *config.Manifest) func(string) bool {
+	integ := m.Ephemeral.IntegrationBranch
+	if integ == "" {
+		integ = gitx.DefaultBranch()
+	}
+	cur, err := gitx.CurrentBranch()
+	onIntegration := err == nil && cur == integ
+	integRef := ""
+	for _, cand := range []string{integ, "origin/" + integ} {
+		if gitx.RefExists(cand) {
+			integRef = cand
+			break
+		}
+	}
+	return func(f string) bool {
+		if !gitx.IsTracked(f) {
+			return true
+		}
+		if onIntegration {
+			return false
+		}
+		if integRef == "" {
+			return true
+		}
+		return !gitx.ExistsOnRef(integRef, f)
+	}
+}
+
 // classifiedDocs partitions the explicitly-classified, currently-readable docs
-// into durable and ephemeral, sorted.
-func classifiedDocs(m *config.Manifest, root string, files []string) (durable, ephemeral []string) {
+// into durable and ephemeral, sorted. A non-nil includeEphemeral filters
+// ephemerals to the current work state.
+func classifiedDocs(m *config.Manifest, root string, files []string, includeEphemeral func(string) bool) (durable, ephemeral []string) {
 	sort.Strings(files)
 	for _, f := range files {
 		rule, ok := m.Match(f)
@@ -67,6 +113,9 @@ func classifiedDocs(m *config.Manifest, root string, files []string) (durable, e
 			continue // private but not decrypted here (no key): pointing at ciphertext is noise
 		}
 		if rule.Lifetime == "ephemeral" {
+			if includeEphemeral != nil && !includeEphemeral(f) {
+				continue
+			}
 			ephemeral = append(ephemeral, f)
 		} else {
 			durable = append(durable, f)

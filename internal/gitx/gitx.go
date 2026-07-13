@@ -216,6 +216,19 @@ func IsTracked(path string) bool {
 	return err == nil && out != ""
 }
 
+// RefExists reports whether name resolves to a ref (branch, tag, remote ref).
+func RefExists(name string) bool {
+	_, err := run("rev-parse", "--verify", "--quiet", name)
+	return err == nil
+}
+
+// ExistsOnRef reports whether path exists in the tree of ref.
+func ExistsOnRef(ref, path string) bool {
+	cmd := exec.Command("git", "cat-file", "-e", ref+":"+path)
+	cmd.Dir = repoDir()
+	return cmd.Run() == nil
+}
+
 // ModifiedInWorktree reports whether path's worktree content differs from the
 // index — the condition under which git rm refuses to delete it.
 func ModifiedInWorktree(path string) bool {
