@@ -220,7 +220,7 @@ func ensureAttributes(root string, m *config.Manifest) error {
 			// concrete gitattributes pattern per alternative so every path the rule
 			// covers actually gets filter=doctier.
 			for _, pat := range expandBraces(r.Path) {
-				lines = append(lines, fmt.Sprintf("%s filter=doctier diff=doctier", pat))
+				lines = append(lines, fmt.Sprintf("%s filter=doctier diff=doctier merge=doctier", pat))
 			}
 		}
 	}
@@ -310,7 +310,16 @@ func configureFilters() error {
 	}
 	// Readable diffs for key holders. Never enable diff.doctier.cachetextconv:
 	// it would cache the decrypted plaintext in git notes inside the repo.
-	return gitx.ConfigSet("diff.doctier.textconv", "doctier textconv")
+	if err := gitx.ConfigSet("diff.doctier.textconv", "doctier textconv"); err != nil {
+		return err
+	}
+	// 3-way merges for key holders: age ciphertext is randomized, so without a
+	// driver ANY two branches touching the same private doc conflict as
+	// interleaved base64.
+	if err := gitx.ConfigSet("merge.doctier.name", "doctier 3-way merge for age-encrypted docs"); err != nil {
+		return err
+	}
+	return gitx.ConfigSet("merge.doctier.driver", "doctier merge %O %A %B %P")
 }
 
 func installHooks() error {

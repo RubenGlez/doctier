@@ -33,6 +33,7 @@ Commands:
   cat <path>               Print one private file's plaintext to stdout (needs a key)
   filter clean|smudge <f>  Git clean/smudge filter (invoked by git, not by hand)
   textconv <f>             Git diff textconv driver (invoked by git, not by hand)
+  merge <O> <A> <B> <P>    Git merge driver for private docs (invoked by git, not by hand)
   version                  Print the doctier version
 
 Run "doctier <command> -h" for command flags.
@@ -66,6 +67,8 @@ func Execute(args []string) int {
 		err = runFilter(args[1:])
 	case "textconv":
 		err = runTextconv(args[1:])
+	case "merge":
+		err = runMerge(args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("doctier %s\n", Version)
 		return 0
