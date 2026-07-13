@@ -1,0 +1,38 @@
+# doctier GitHub Action — install doctier and run its fail-closed policy check.
+#
+#   - uses: RubenGlez/doctier/action@v0.6.0
+#
+# runs `doctier check` on the committed blobs. No age key is needed: check
+# verifies that private docs are encrypted at rest, it never decrypts them.
+# Later steps in the same job can call `doctier` directly (it is on PATH).
+name: "doctier"
+description: "Fail-closed policy check for doctier-managed documents: private docs encrypted at rest, sensitive files never committed."
+branding:
+  icon: "lock"
+  color: "purple"
+
+inputs:
+  version:
+    description: "doctier version to install, without the leading v (default: latest release)"
+    required: false
+    default: ""
+  args:
+    description: "Arguments passed to doctier (default: check)"
+    required: false
+    default: "check"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install doctier
+      shell: bash
+      env:
+        DOCTIER_VERSION: ${{ inputs.version }}
+        DOCTIER_INSTALL: ${{ runner.temp }}/doctier-bin
+      run: |
+        sh "${{ github.action_path }}/../install.sh"
+        echo "$DOCTIER_INSTALL" >> "$GITHUB_PATH"
+
+    - name: Run doctier
+      shell: bash
+      run: doctier ${{ inputs.args }}

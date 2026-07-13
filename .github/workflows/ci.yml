@@ -36,3 +36,14 @@ jobs:
         run: |
           go build -o /tmp/doctier .
           /tmp/doctier check
+
+  # Dogfood the bundled GitHub Action (action/): installs the latest release
+  # binary (checksum-verified) and runs `doctier check` on this repo.
+  action-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: doctier check via action
+        uses: ./action

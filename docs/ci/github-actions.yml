@@ -7,7 +7,9 @@
 #   gc    — collect pr-merge ephemerals after a merge lands on the default
 #           branch, then commit the deletions back.
 #
-# Pin @latest to a tag once you depend on this in earnest.
+# Both use the bundled action (RubenGlez/doctier/action), which installs the
+# prebuilt binary checksum-verified and leaves `doctier` on PATH for later
+# steps. Pin @main to a tag once you depend on this in earnest.
 
 name: doctier
 on:
@@ -21,11 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: stable }
-      - run: go install github.com/rubenglez/doctier@latest
-      - run: doctier check
-
+      - uses: RubenGlez/doctier/action@main # runs `doctier check` by default
   gc:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -38,12 +36,11 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
           fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with: { go-version: stable }
-      - run: go install github.com/rubenglez/doctier@latest
-      - name: Collect pr-merge ephemerals
+      - uses: RubenGlez/doctier/action@main
+        with:
+          args: gc --trigger pr-merge
+      - name: Commit collected ephemerals
         run: |
-          doctier gc --trigger pr-merge
           if ! git diff --cached --quiet; then
             git config user.name "doctier-bot"
             git config user.email "doctier@users.noreply.github.com"
