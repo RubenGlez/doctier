@@ -23,9 +23,8 @@ clean/smudge filter, scheduled deletion, or a gitignored local file) and refuses
 fail-closed, to let a private doc be committed in cleartext.
 
 > Status: **early (v0.x), actively developed.** The core — manifest, age clean/smudge
-> filters, fail-closed checks, ephemeral GC — works end-to-end and ships as signed,
-> notarized binaries. Some designed capabilities (e.g. work-state-aware `doctier agents`
-> filtering that emits only the docs relevant to the current work state) aren't built yet.
+> filters, fail-closed checks, merge driver, ephemeral GC, work-state-aware
+> `doctier agents` — works end-to-end and ships as signed, notarized binaries.
 
 ## Why it exists
 
@@ -96,11 +95,12 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 | `doctier status` | Show the effective classification of each document. |
 | `doctier unlock` | Decrypt private docs from the index into the working tree — for fresh clones and headless/CI runs (needs a key). |
 | `doctier cat <path>` | Print one private doc's plaintext to stdout without writing it to disk (needs a key). |
-| `doctier agents [--write]` | Emit a tier-aware context block for `AGENTS.md` / `CLAUDE.md` (print, or `--write` to maintain a managed block). |
+| `doctier agents [--write] [--all]` | Emit a tier-aware context block for `AGENTS.md` / `CLAUDE.md` (print, or `--write` to maintain a managed block). Ephemerals are listed only while in flight for the current work unit; `--all` lists every one. |
 | `doctier gc [--trigger ttl\|worktree\|pr-merge\|branch\|all]` | Collect expired ephemerals. |
 | `doctier grant ["<ssh-pubkey>"]` | Add a recipient and re-encrypt private docs. With no key, just re-encrypt to the current set — the revoke flow: delete the recipient's line, then run `doctier grant`. |
 | `doctier filter clean\|smudge <file>` | Git filter (invoked by git, not by hand). |
 | `doctier textconv <file>` | Git diff driver: `git diff` shows private docs decrypted when a key is present (invoked by git, not by hand). |
+| `doctier merge <O> <A> <B> <P>` | Git merge driver: 3-way merges private docs in plaintext and re-encrypts the result (invoked by git, not by hand). |
 
 ## Install
 
@@ -254,7 +254,13 @@ clean/smudge filter lives in `.git/config` and the hooks in `.git/hooks`; neithe
 travels with the repo, so a fresh clone has no local protection until it runs
 `doctier init`. CI inspects the committed blobs directly (filter installed or not),
 so it is what makes the guarantee hold for every contributor. CI also drives the
-`pr-merge` collection. Copy-paste recipes for [GitHub Actions](docs/ci/github-actions.yml)
+`pr-merge` collection. On GitHub, the bundled action is one line:
+
+```yaml
+- uses: RubenGlez/doctier/action@main   # installs doctier and runs `doctier check`
+```
+
+Copy-paste recipes for [GitHub Actions](docs/ci/github-actions.yml)
 and [GitLab CI](docs/ci/gitlab-ci.yml); neither needs your age key (check and gc
 never decrypt).
 
@@ -269,6 +275,13 @@ never decrypt).
   CODEOWNERS / required review, and treat any diff to them as a security review.
 - **Revocation is forward-only.** A removed recipient can still decrypt every
   version already in git history; re-encryption protects future changes only.
+- **Merging concurrently edited private docs needs a key.** age ciphertext is
+  randomized, so two branches touching the same private doc always collide; the
+  `merge.doctier` driver (wired by `init`) decrypts both sides, 3-way merges the
+  plaintext and re-encrypts the result. Real conflicts appear as plaintext
+  markers in the working tree (the index keeps ciphertext). On a keyless machine
+  the driver reports a conflict and tells you how to keep one side
+  (`git checkout --ours/--theirs`).
 - age has no authenticated associated data: encrypted blobs are not bound to
   their path or version, so a writer without keys can swap or roll back
   ciphertexts undetected.
