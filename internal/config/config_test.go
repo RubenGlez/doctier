@@ -88,6 +88,15 @@ func TestValidate(t *testing.T) {
 			{Path: "docs/strategy/**", Visibility: "private", Lifetime: "durable"},
 		}}, "unreachable"},
 		{"bad policy", &Manifest{Policy: PolicyCfg{Uncovered: "blok"}}, "policy.uncovered must be"},
+		{"private path with whitespace", &Manifest{Docs: []Rule{
+			{Path: "my docs/**", Visibility: "private", Lifetime: "durable"},
+		}}, "must not contain whitespace"},
+		{"sensitive path with whitespace", &Manifest{Docs: []Rule{
+			{Path: "my scratch/**", Visibility: "private", Lifetime: "ephemeral", Sensitive: true, Expire: &Expire{On: "worktree", Scope: "worktree"}},
+		}}, "must not contain whitespace"},
+		{"public path with whitespace ok", &Manifest{Docs: []Rule{
+			{Path: "my docs/**", Visibility: "public", Lifetime: "durable"},
+		}}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -136,6 +145,21 @@ func TestSensitiveDefaultsExpireToWorktree(t *testing.T) {
 	}
 	if m.Docs[0].Expire == nil || m.Docs[0].Expire.On != "worktree" {
 		t.Fatalf("expected expire to default to worktree, got %+v", m.Docs[0].Expire)
+	}
+}
+
+// A manifest file without version: 1 must fail to load — a future format bump
+// must not be silently interpreted under v1 semantics.
+func TestLoadRequiresVersionOne(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".doctier.yml")
+	for _, body := range []string{"docs: []\n", "version: 2\ndocs: []\n"} {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "version") {
+			t.Fatalf("manifest %q should fail with a version error, got %v", body, err)
+		}
 	}
 }
 

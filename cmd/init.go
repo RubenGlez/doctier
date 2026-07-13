@@ -86,6 +86,14 @@ exec doctier gc --trigger pr-merge
 // runInit scaffolds the manifest, recipients file, git attributes, ignore
 // entries, clean/smudge filters and hooks. It is idempotent.
 func runInit(args []string) error {
+	fs := newFlagSet("init", `usage: doctier init
+
+Scaffold .doctier.yml, the recipients file, .gitattributes/.gitignore managed
+blocks, the clean/smudge filter and the git hooks. Idempotent — re-run it after
+editing .doctier.yml to sync the generated artifacts with the rules.`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	root, err := gitx.Root()
 	if err != nil {
 		return fmt.Errorf("not inside a git repository: %w", err)
@@ -281,7 +289,10 @@ func ensureIgnores(root string, m *config.Manifest) error {
 	lines := []string{".doctier/trash/"}
 	for _, r := range m.Docs {
 		if r.LocalOnly() {
-			lines = append(lines, r.Path)
+			// Same dialect gap as .gitattributes: git does not expand {a,b}
+			// braces, so a verbatim brace pattern would ignore nothing and the
+			// "never committed" file would be swept up by `git add .`.
+			lines = append(lines, expandBraces(r.Path)...)
 		}
 	}
 	return ensureBlock(filepath.Join(root, ".gitignore"), lines)
@@ -303,11 +314,14 @@ func configureFilters() error {
 }
 
 func installHooks() error {
-	gitDir, err := gitx.GitDir()
+	// Hooks live in the COMMON git dir: in a linked worktree GitDir() is
+	// .git/worktrees/<name>, whose hooks/ git never reads — installing there
+	// would silently leave the worktree with no pre-commit protection at all.
+	common, err := gitx.CommonDir()
 	if err != nil {
 		return err
 	}
-	hooks := filepath.Join(gitDir, "hooks")
+	hooks := filepath.Join(common, "hooks")
 	// If an external (e.g. global) core.hooksPath is active, git would ignore this
 	// repo's own hooks dir — and writing doctier's hooks into the shared dir would
 	// make every OTHER repo run them (they no-op via the manifest guard, but it is

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bufio"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,7 +15,11 @@ import (
 // runCheck enforces the policy fail-closed. It is meant for pre-commit /
 // pre-push hooks and CI. Any violation returns a non-zero exit.
 func runCheck(args []string) error {
-	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	fs := newFlagSet("check", `usage: doctier check [--staged|--push]
+
+Fail-closed policy check: the whole index (default, for CI), staged files only
+(--staged, the pre-commit hook), or the trees of the commits being pushed
+(--push, the pre-push hook; reads the ref updates from stdin).`)
 	staged := fs.Bool("staged", false, "check staged files only (default: all listed files)")
 	push := fs.Bool("push", false, "validate the trees of commits being pushed (reads pre-push stdin)")
 	if err := fs.Parse(args); err != nil {
@@ -79,8 +82,11 @@ func runCheck(args []string) error {
 	for _, f := range files {
 		rule, ok := m.Match(f)
 		if !ok {
-			if m.Policy.Uncovered == "block" {
+			switch m.Policy.Uncovered {
+			case "block":
 				problems = append(problems, fmt.Sprintf("%s: not covered by any rule (policy.uncovered=block)", f))
+			case "warn":
+				warnings = append(warnings, fmt.Sprintf("%s: not covered by any rule (public+durable by default)", f))
 			}
 			continue
 		}
@@ -217,7 +223,17 @@ func checkTree(m *config.Manifest, ref string) []string {
 	var problems []string
 	for _, f := range files {
 		rule, ok := m.Match(f)
-		if !ok || !rule.Encrypted() {
+		if !ok {
+			continue
+		}
+		// A sensitive ephemeral must never be committed. The push net exists to
+		// catch commits made with --no-verify or before init — the strongest
+		// confidentiality class cannot be the one class it skips.
+		if rule.LocalOnly() {
+			problems = append(problems, fmt.Sprintf("%s@%s: sensitive ephemeral committed in a pushed commit", f, ref[:min(len(ref), 12)]))
+			continue
+		}
+		if !rule.Encrypted() {
 			continue
 		}
 		blob, err := gitx.TreeBlob(ref, f)

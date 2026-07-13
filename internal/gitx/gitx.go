@@ -6,11 +6,43 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
+
+// rootCache memoizes the worktree root per working directory. Keyed by cwd
+// rather than a single process-wide value because tests chdir between scratch
+// repos within one process.
+var rootCache sync.Map // cwd -> root ("" when not inside a repo)
+
+// repoDir returns the top-level directory of the worktree containing the
+// current working directory, or "" when outside a repo. Every git command is
+// anchored there: output like ls-files is cwd-relative, and the manifest's
+// globs are root-relative — running git from a subdirectory would silently
+// misclassify every path (a fail-closed check would pass over cleartext).
+func repoDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if v, ok := rootCache.Load(cwd); ok {
+		return v.(string)
+	}
+	root := ""
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err == nil {
+		root = strings.TrimSpace(out.String())
+	}
+	rootCache.Store(cwd, root)
+	return root
+}
 
 // run executes git with args and returns stdout, trimmed. stderr is folded into
 // the error so callers get a useful message.
@@ -27,6 +59,7 @@ func run(args ...string) (string, error) {
 // trailing whitespace, and the records are separated by NUL, not newline).
 func runRaw(args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
+	cmd.Dir = repoDir()
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
@@ -101,6 +134,7 @@ func TreeFiles(ref string) ([]string, error) {
 // TreeBlob returns the content of path in the given commit/tree.
 func TreeBlob(ref, path string) ([]byte, error) {
 	cmd := exec.Command("git", "cat-file", "blob", ref+":"+path)
+	cmd.Dir = repoDir()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -113,6 +147,7 @@ func TreeBlob(ref, path string) ([]byte, error) {
 // path is not in the index.
 func StagedBlob(path string) ([]byte, error) {
 	cmd := exec.Command("git", "cat-file", "blob", ":"+path)
+	cmd.Dir = repoDir()
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -129,6 +164,7 @@ func StagedBlobs(paths []string) (map[string][]byte, error) {
 		return nil, nil
 	}
 	cmd := exec.Command("git", "cat-file", "--batch")
+	cmd.Dir = repoDir()
 	var in bytes.Buffer
 	for _, p := range paths {
 		in.WriteString(":" + p + "\n")
@@ -178,6 +214,13 @@ func StagedBlobs(paths []string) (map[string][]byte, error) {
 func IsTracked(path string) bool {
 	out, err := run("ls-files", "--", path)
 	return err == nil && out != ""
+}
+
+// ModifiedInWorktree reports whether path's worktree content differs from the
+// index — the condition under which git rm refuses to delete it.
+func ModifiedInWorktree(path string) bool {
+	_, err := run("diff", "--quiet", "--", path)
+	return err != nil
 }
 
 // Remove stages the deletion of path from the working tree and index.
@@ -280,6 +323,24 @@ func ConfigGetAny(key string) string {
 
 // GitDir returns the absolute path to the repository's .git directory.
 func GitDir() (string, error) { return run("rev-parse", "--absolute-git-dir") }
+
+// CommonDir returns the absolute path to the repository's common .git
+// directory. In a linked worktree GitDir is .git/worktrees/<name>, whose
+// hooks/ git never reads — hooks (and shared config) live in the common dir.
+func CommonDir() (string, error) {
+	out, err := run("rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(out) {
+		root, err := Root()
+		if err != nil {
+			return "", err
+		}
+		out = filepath.Join(root, out)
+	}
+	return out, nil
+}
 
 // HooksPath returns the effective hooks directory.
 func HooksPath() (string, error) {

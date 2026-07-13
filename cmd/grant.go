@@ -16,6 +16,15 @@ import (
 // line from the recipients file and re-run `doctier grant` with no argument,
 // which just re-encrypts to the current recipient set.
 func runGrant(args []string) error {
+	fs := newFlagSet("grant", `usage: doctier grant ["<ssh-pubkey>"]
+
+Add an SSH public key as a recipient and re-encrypt private docs to the current
+recipient set. With no key it only re-encrypts — the revoke flow: delete the
+recipient's line from the recipients file, then run 'doctier grant'.`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	args = fs.Args()
 	m, root, err := loadManifest()
 	if err != nil {
 		return err

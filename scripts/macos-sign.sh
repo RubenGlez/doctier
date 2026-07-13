@@ -36,6 +36,9 @@ codesign --verify --strict --verbose=2 "$BIN"
 # submit a zip and rely on Gatekeeper's online ticket check at first run.
 if [ -n "${MACOS_NOTARY_KEY:-}" ] && [ -n "${MACOS_NOTARY_KEY_ID:-}" ] && [ -n "${MACOS_NOTARY_ISSUER_ID:-}" ]; then
 	workdir="$(mktemp -d)"
+	# The workdir holds the notary private key; with set -e a failing ditto or
+	# notarytool would otherwise abort before the cleanup line and leave it on disk.
+	trap 'rm -rf "$workdir"' EXIT
 	keyfile="$workdir/AuthKey.p8"
 	# The secret may hold the raw .p8 PEM or a base64 blob; accept either.
 	if printf '%s' "$MACOS_NOTARY_KEY" | grep -q "BEGIN PRIVATE KEY"; then
@@ -51,7 +54,6 @@ if [ -n "${MACOS_NOTARY_KEY:-}" ] && [ -n "${MACOS_NOTARY_KEY_ID:-}" ] && [ -n "
 		--key-id "$MACOS_NOTARY_KEY_ID" \
 		--issuer "$MACOS_NOTARY_ISSUER_ID" \
 		--wait
-	rm -rf "$workdir"
 	echo "macos-sign: notarized $BIN"
 else
 	echo "macos-sign: notary credentials absent — $BIN signed but not notarized"

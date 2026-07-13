@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +20,11 @@ import (
 //	worktree  prune bookkeeping for removed worktrees
 //	all       ttl + worktree (the safe local sweep; pr-merge and branch are opt-in)
 func runGC(args []string) error {
-	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
+	fs := newFlagSet("gc", `usage: doctier gc [--trigger ttl|worktree|pr-merge|branch|all] [--dry-run]
+
+Collect expired ephemeral documents. The default trigger "all" is the safe
+local sweep (ttl + worktree); pr-merge and branch collect tracked docs and are
+opt-in — run them explicitly from CI or the post-merge hook.`)
 	trigger := fs.String("trigger", "all", "ttl|worktree|pr-merge|branch|all")
 	dry := fs.Bool("dry-run", false, "show what would be collected without deleting")
 	if err := fs.Parse(args); err != nil {
@@ -45,38 +48,49 @@ func runGC(args []string) error {
 	}
 
 	do := func(t string) bool { return *trigger == t || *trigger == "all" }
-	var collected int
+	var collected, failed int
 
 	if do("ttl") {
 		// Sensitive ephemerals are gitignored, so git never lists them; without
 		// this the ttl "disk safety net" for local-only files would never fire.
 		files = append(files, localOnlyTTLFiles(m, root, files)...)
-		collected += gcTTL(m, root, files, *dry)
+		n, f := gcTTL(m, root, files, *dry)
+		collected, failed = collected+n, failed+f
 	}
 	if *trigger == "pr-merge" { // opt-in only; never part of "all"
-		collected += gcPRMerge(m, files, *dry)
+		n, f := gcPRMerge(m, files, *dry)
+		collected, failed = collected+n, failed+f
 	}
 	if *trigger == "branch" { // opt-in only; never part of "all"
-		collected += gcBranch(m, files, *dry)
+		n, f := gcBranch(m, files, *dry)
+		collected, failed = collected+n, failed+f
 	}
 	if do("worktree") {
 		gcWorktree(*dry)
 	}
 
-	if collected == 0 {
+	if collected == 0 && failed == 0 {
 		fmt.Println("doctier gc: nothing to collect")
 	} else if *dry {
 		fmt.Printf("doctier gc: %d document(s) would be collected (dry-run)\n", collected)
 	} else {
 		fmt.Printf("doctier gc: collected %d document(s)\n", collected)
 	}
+	// A cron/CI gc job must not report success while removals fail forever.
+	if failed > 0 && !*dry {
+		return fmt.Errorf("%d document(s) could not be collected", failed)
+	}
 	return nil
 }
 
-func gcTTL(m *config.Manifest, root string, files []string, dry bool) int {
+func gcTTL(m *config.Manifest, root string, files []string, dry bool) (n, failed int) {
 	now := time.Now()
-	n := 0
 	for _, f := range files {
+		// Never re-collect quarantined files: a `**`-anchored rule matches them
+		// at their trash path too, and each sweep would nest them a level deeper.
+		if strings.HasPrefix(f, ".doctier/trash/") {
+			continue
+		}
 		rule, ok := m.Match(f)
 		if !ok || rule.Lifetime != "ephemeral" || rule.Expire == nil || rule.Expire.On != "ttl" {
 			continue
@@ -103,18 +117,28 @@ func gcTTL(m *config.Manifest, root string, files []string, dry bool) int {
 			continue
 		}
 		fmt.Printf("  ttl-expired: %s (%dd old)\n", f, int(age.Hours()/24))
-		n++
 		if dry {
+			n++
 			continue
 		}
-		if err := removeFile(f, abs, root); err != nil {
+		// Count only removals that actually happened — "collected N" must not
+		// include files left in place. A deliberate spare (uncommitted
+		// modifications) warns but is not a failure; anything else is.
+		removed, err := removeFile(f, abs, root)
+		switch {
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "  ! failed to remove %s: %v\n", f, err)
+			failed++
+		case !removed:
+			fmt.Fprintf(os.Stderr, "  ! spared %s: uncommitted modifications — commit or discard them, then re-run gc\n", f)
+		default:
+			n++
 		}
 	}
-	return n
+	return n, failed
 }
 
-func gcPRMerge(m *config.Manifest, files []string, dry bool) int {
+func gcPRMerge(m *config.Manifest, files []string, dry bool) (n, failed int) {
 	return gcOnIntegration(m, files, dry, "pr-merge", func(r config.Rule) bool {
 		return r.Expire.On == "pr-merge"
 	})
@@ -124,7 +148,7 @@ func gcPRMerge(m *config.Manifest, files []string, dry bool) int {
 // tracked docs that should disappear once their feature branch merges. Collection
 // reuses the same integration-branch detection as pr-merge — a merged branch's doc
 // is present on the integration branch.
-func gcBranch(m *config.Manifest, files []string, dry bool) int {
+func gcBranch(m *config.Manifest, files []string, dry bool) (n, failed int) {
 	return gcOnIntegration(m, files, dry, "branch", config.Rule.BranchScoped)
 }
 
@@ -133,7 +157,7 @@ func gcBranch(m *config.Manifest, files []string, dry bool) int {
 // merged once the doc is present on the integration branch. On a feature branch
 // these ephemerals are still in flight, so collecting would be destructive (e.g. a
 // post-merge hook firing on a routine `git pull`). Shared by pr-merge and branch.
-func gcOnIntegration(m *config.Manifest, files []string, dry bool, label string, want func(config.Rule) bool) int {
+func gcOnIntegration(m *config.Manifest, files []string, dry bool, label string, want func(config.Rule) bool) (n, failed int) {
 	integ := m.Ephemeral.IntegrationBranch
 	if integ == "" {
 		integ = gitx.DefaultBranch()
@@ -141,28 +165,36 @@ func gcOnIntegration(m *config.Manifest, files []string, dry bool, label string,
 	cur, err := gitx.CurrentBranch()
 	if err != nil || cur != integ {
 		fmt.Printf("  %s: skipped — not on integration branch %q (on %q)\n", label, integ, cur)
-		return 0
+		return 0, 0
 	}
 
-	n := 0
 	for _, f := range files {
 		rule, ok := m.Match(f)
 		if !ok || rule.Lifetime != "ephemeral" || rule.Expire == nil || !want(rule) {
 			continue
 		}
+		// Only tracked docs have "reached the integration branch"; an untracked
+		// in-flight file matching the rule has nothing to collect (and git rm
+		// would fail on it anyway).
+		if !gitx.IsTracked(f) {
+			continue
+		}
 		fmt.Printf("  %s-expired: %s\n", label, f)
-		n++
 		if dry {
+			n++
 			continue
 		}
 		if err := gitx.Remove(f); err != nil {
 			fmt.Fprintf(os.Stderr, "  ! failed to git rm %s: %v\n", f, err)
+			failed++
+			continue
 		}
+		n++
 	}
 	if n > 0 && !dry {
 		fmt.Printf("  → staged deletions; commit them to complete %s collection\n", label)
 	}
-	return n
+	return n, failed
 }
 
 func gcWorktree(dry bool) {
@@ -192,7 +224,10 @@ func localOnlyTTLFiles(m *config.Manifest, root string, listed []string) []strin
 		}
 		matches, _ := doublestar.Glob(fsys, r.Path, doublestar.WithFilesOnly())
 		for _, f := range matches {
-			if seen[f] || f == ".git" || strings.HasPrefix(f, ".git/") {
+			// Skip the quarantine dir too: a quarantined file keeps its relative
+			// path and mtime, so a `**`-anchored rule would re-match it and every
+			// sweep would nest it one level deeper into trash, forever.
+			if seen[f] || f == ".git" || strings.HasPrefix(f, ".git/") || strings.HasPrefix(f, ".doctier/trash/") {
 				continue
 			}
 			seen[f] = true
@@ -203,17 +238,27 @@ func localOnlyTTLFiles(m *config.Manifest, root string, listed []string) []strin
 }
 
 // removeFile collects f: a staged deletion for tracked files (recoverable from
-// git), and a reversible quarantine for untracked (local-only) ones. When git rm
-// refuses a tracked file — e.g. it has uncommitted modifications — that refusal
-// is a protection, so propagate it instead of deleting the changes unrecoverably.
-func removeFile(f, abs, root string) error {
+// git), and a reversible quarantine for untracked (local-only) ones. A tracked
+// file with uncommitted modifications is spared (removed=false, no error) — the
+// git rm refusal is a protection, not a gc failure — so callers can tell a
+// deliberate spare from a removal that actually failed.
+func removeFile(f, abs, root string) (removed bool, err error) {
 	if gitx.IsTracked(f) {
-		return gitx.Remove(f)
+		if gitx.ModifiedInWorktree(f) {
+			return false, nil
+		}
+		if err := gitx.Remove(f); err != nil {
+			return false, err
+		}
+		return true, nil
 	}
 	// Untracked file: git has no copy, so an unlink would be unrecoverable. Move
 	// it into a quarantine dir instead — reversible, and a second gc sweep (or the
 	// user) can purge it later.
-	return quarantine(abs, root, f)
+	if err := quarantine(abs, root, f); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // quarantine moves an untracked file into .doctier/trash/, preserving its

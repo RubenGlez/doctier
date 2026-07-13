@@ -2,6 +2,8 @@
 package cmd
 
 import (
+	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,10 +77,28 @@ func Execute(args []string) int {
 		return 2
 	}
 	if err != nil {
+		// "doctier <cmd> -h" is a help request, not a failure: the FlagSet has
+		// already printed usage, so exit 0 without a leaked parse error.
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		fmt.Fprintf(os.Stderr, "doctier: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+// newFlagSet returns a FlagSet for a subcommand whose -h/--help prints the
+// given usage line plus any registered flags. Every subcommand must parse its
+// args through one of these — a command that ignores args would otherwise
+// RUN on "doctier <cmd> -h" instead of printing help.
+func newFlagSet(name, usage string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), usage)
+		fs.PrintDefaults()
+	}
+	return fs
 }
 
 // loadManifest finds the repo root and loads its manifest.
@@ -89,6 +109,11 @@ func loadManifest() (*config.Manifest, string, error) {
 	}
 	m, err := config.Load(filepath.Join(root, config.DefaultPath))
 	if err != nil {
+		// The most common first error: a command run before init. A raw ENOENT
+		// tells the user nothing about what to do next.
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, root, fmt.Errorf("no .doctier.yml found — run 'doctier init' to set up this repository")
+		}
 		return nil, root, err
 	}
 	return m, root, nil

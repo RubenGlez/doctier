@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"gopkg.in/yaml.v3"
@@ -67,6 +68,11 @@ func Load(path string) (*Manifest, error) {
 	if err := yaml.Unmarshal(raw, &m); err != nil {
 		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
+	// A future format bump must not load silently under v1 semantics — in a
+	// fail-closed tool, misreading the policy is worse than refusing it.
+	if m.Version != 1 {
+		return nil, fmt.Errorf("manifest must declare 'version: 1' (got %d)", m.Version)
+	}
 	m.applyDefaults()
 	if err := m.validate(); err != nil {
 		return nil, err
@@ -112,6 +118,13 @@ func (m *Manifest) validate() error {
 		}
 		if !doublestar.ValidatePattern(r.Path) {
 			return fmt.Errorf("docs[%d] (%q): invalid glob pattern", i, r.Path)
+		}
+		// Private and sensitive rules are enforced through .gitattributes /
+		// .gitignore lines, and those dialects cannot express whitespace: the
+		// generated line is dead, the filter/ignore never attaches, and the
+		// file would stage as plaintext. Reject loudly instead.
+		if strings.ContainsAny(r.Path, " \t") && (r.Visibility == "private" || r.Sensitive) {
+			return fmt.Errorf("docs[%d] (%q): private/sensitive rule paths must not contain whitespace (.gitattributes/.gitignore cannot express them)", i, r.Path)
 		}
 		switch r.Visibility {
 		case "public", "private":

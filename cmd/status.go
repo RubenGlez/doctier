@@ -13,6 +13,13 @@ import (
 
 // runStatus prints the effective classification of each listed document.
 func runStatus(args []string) error {
+	fs := newFlagSet("status", `usage: doctier status
+
+Show the effective classification (visibility, lifetime, storage, expiry) of
+each document git sees, plus warnings when this clone is missing setup.`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	m, _, err := loadManifest()
 	if err != nil {
 		return err

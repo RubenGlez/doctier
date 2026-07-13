@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,7 +26,10 @@ const (
 // a key is skipped). doctier does not expose tiers to the agent; it curates the
 // index that the convention surfaces.
 func runAgents(args []string) error {
-	fs := flag.NewFlagSet("agents", flag.ContinueOnError)
+	fs := newFlagSet("agents", `usage: doctier agents [--write] [--file AGENTS.md]
+
+Emit a tier-aware context block listing the classified, currently-readable
+docs — print it, or --write to maintain a managed block in the target file.`)
 	write := fs.Bool("write", false, "insert/update the managed block in the target file instead of printing it")
 	file := fs.String("file", "AGENTS.md", "target file for --write")
 	if err := fs.Parse(args); err != nil {
@@ -119,10 +121,18 @@ func writeBlock(root, file, block string) error {
 
 	var out string
 	start := strings.Index(content, agentsBegin)
-	end := strings.Index(content, agentsEnd)
 	switch {
-	case start >= 0 && end > start:
-		out = content[:start] + strings.TrimRight(block, "\n") + content[end+len(agentsEnd):]
+	case start >= 0:
+		// Find the end marker AFTER begin, not globally: a stray end marker
+		// before begin would otherwise send us down the append path and
+		// duplicate the managed block (same hardening as init's ensureBlock).
+		// If no end follows begin, treat begin→EOF as the corrupt block.
+		tail := content[start+len(agentsBegin):]
+		var rest string
+		if rel := strings.Index(tail, agentsEnd); rel >= 0 {
+			rest = tail[rel+len(agentsEnd):]
+		}
+		out = content[:start] + strings.TrimRight(block, "\n") + rest
 	case strings.TrimSpace(content) == "":
 		out = block
 	default:

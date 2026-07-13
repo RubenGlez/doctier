@@ -92,8 +92,10 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 | Command | What it does |
 |---|---|
 | `doctier init` | Scaffold `.doctier.yml`, `.gitattributes`, `.gitignore`, hooks and the clean/smudge filter. |
-| `doctier check [--staged]` | Fail-closed policy check (for pre-commit/pre-push and CI). |
+| `doctier check [--staged\|--push]` | Fail-closed policy check: the index (CI), staged files (pre-commit) or pushed commit trees (pre-push). |
 | `doctier status` | Show the effective classification of each document. |
+| `doctier unlock` | Decrypt private docs from the index into the working tree — for fresh clones and headless/CI runs (needs a key). |
+| `doctier cat <path>` | Print one private doc's plaintext to stdout without writing it to disk (needs a key). |
 | `doctier agents [--write]` | Emit a tier-aware context block for `AGENTS.md` / `CLAUDE.md` (print, or `--write` to maintain a managed block). |
 | `doctier gc [--trigger ttl\|worktree\|pr-merge\|branch\|all]` | Collect expired ephemerals. |
 | `doctier grant ["<ssh-pubkey>"]` | Add a recipient and re-encrypt private docs. With no key, just re-encrypt to the current set — the revoke flow: delete the recipient's line, then run `doctier grant`. |
@@ -105,11 +107,12 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 No Go toolchain required — pick one:
 
 ```bash
-# Homebrew (this repo doubles as its own tap)
+# Homebrew (macOS only — the artifact is a cask; this repo doubles as its own tap)
 brew tap RubenGlez/doctier https://github.com/RubenGlez/doctier
 brew install doctier
 
-# Install script (Linux/macOS): downloads the right prebuilt binary
+# Install script (Linux/macOS): downloads the right prebuilt binary and
+# verifies it against the release's checksums.txt
 curl -fsSL https://raw.githubusercontent.com/RubenGlez/doctier/main/install.sh | sh
 
 # Or grab a binary from https://github.com/RubenGlez/doctier/releases
@@ -137,6 +140,26 @@ or `~/.ssh/id_rsa`). The key must be passphrase-less: git filters cannot prompt,
 so a passphrase-protected key leaves private docs encrypted in your worktree (you
 get a warning on checkout and from `doctier status`). Point `$DOCTIER_SSH_KEY` at
 a dedicated key if your main one has a passphrase.
+
+## Joining a repo that already uses doctier
+
+A fresh clone checks out private docs as age ciphertext (`-----BEGIN AGE
+ENCRYPTED FILE-----` blocks) — expected, not broken: the filter and hooks live
+in `.git`, so they don't travel with the clone. To get to plaintext:
+
+1. Install doctier and run `doctier init` in the clone — it wires the filter
+   and hooks so future checkouts decrypt automatically.
+2. Get granted: send your `~/.ssh/id_ed25519.pub` to someone who already has
+   access; they run `doctier grant "<your key>"` and commit the result. You
+   cannot self-serve by adding your own key — it can't decrypt blobs that were
+   encrypted before it was a recipient. No key yet? `ssh-keygen -t ed25519`.
+3. `git pull`, then `doctier unlock` — it decrypts the already-checked-out
+   ciphertext into your working tree. (Plain `git checkout` / `git reset
+   --hard` are no-ops here: git considers the files unmodified.)
+
+`doctier unlock` never overwrites files that are already plaintext in your
+working tree, so it is safe to re-run at any time. To read a single doc without
+setup, `doctier cat <path>` prints its plaintext to stdout.
 
 ## Walkthrough
 
@@ -223,7 +246,8 @@ the commit if:
 - a `private` file is staged in cleartext (filter not applied),
 - a `sensitive` ephemeral is staged at all,
 - a document matches no rule **and** you opted into `policy.uncovered: block`
-  (off by default: uncovered docs are treated as `public` + `durable`).
+  (off by default: uncovered docs are treated as `public` + `durable`;
+  `policy.uncovered: warn` reports them without failing the check).
 
 **Run `doctier check` in CI — it is the only host-independent guarantee.** The
 clean/smudge filter lives in `.git/config` and the hooks in `.git/hooks`; neither
@@ -265,9 +289,14 @@ never decrypt).
   needs `git filter-repo` to scrub.
 - **`LoadIdentity` needs a passphrase-less private key** (no ssh-agent or age-native
   identity support), which pushes toward keeping an unencrypted key on disk.
-- **Windows is built but untested.** Release binaries ship for windows/amd64+arm64,
-  but the hooks are `sh` scripts and `install.sh` excludes Windows; hook behavior
-  under Git-for-Windows `sh` is assumed, not verified.
+- **A missing `doctier` binary blocks git operations on private paths.** The filter
+  is installed with `required=true` (fail-closed), so if doctier is uninstalled — or
+  a GUI git client's PATH lacks the install dir (e.g. `~/.local/bin`) — checkouts and
+  adds touching private files fail with git's opaque "external filter ... failed".
+  Fix the client's PATH, or temporarily `git config filter.doctier.required false`.
+- **Windows is not supported.** The hooks are `sh` scripts and nothing is tested
+  under Git-for-Windows, so no Windows binaries are shipped (WSL works — it is
+  just Linux).
 
 Encryption is age-only by design (a separate private-repo backend is an explicit
 non-goal).

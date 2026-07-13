@@ -139,7 +139,9 @@ func LoadRecipients(path string) ([]age.Recipient, error) {
 		return nil, err
 	}
 	if len(recipients) == 0 {
-		return nil, fmt.Errorf("no recipients found in %s", path)
+		// This is the first-private-doc moment: the fix is one command, so the
+		// error (which git's filter machinery surfaces verbatim) must name it.
+		return nil, fmt.Errorf("no recipients found in %s — add one with: doctier grant \"$(cat ~/.ssh/id_ed25519.pub)\"", path)
 	}
 	return recipients, nil
 }
@@ -164,7 +166,8 @@ func LoadIdentity(keyPath string) (age.Identity, error) {
 		return identityFromPEM([]byte(keyPath))
 	}
 	candidates := []string{keyPath}
-	if keyPath == "" {
+	usingDefaults := keyPath == ""
+	if usingDefaults {
 		home, _ := os.UserHomeDir()
 		candidates = []string{
 			filepath.Join(home, ".ssh", "id_ed25519"),
@@ -190,6 +193,11 @@ func LoadIdentity(keyPath string) (age.Identity, error) {
 	}
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no SSH private key found")
+	}
+	if usingDefaults {
+		// The raw error names only the last candidate tried (id_rsa), which
+		// misdirects a keyless first-time user; list the real options instead.
+		return nil, fmt.Errorf("no usable SSH key (tried ~/.ssh/id_ed25519, ~/.ssh/id_rsa; set $DOCTIER_SSH_KEY or $DOCTIER_IDENTITY, or create one: ssh-keygen -t ed25519): %w", lastErr)
 	}
 	return nil, lastErr
 }

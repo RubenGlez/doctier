@@ -63,6 +63,22 @@ trap 'rm -rf "$tmp"' EXIT
 
 echo "install: downloading ${BIN} ${version} (${os}/${arch})"
 curl -fsSL "$url" -o "${tmp}/${asset}" || fail "download failed: ${url}"
+
+# --- verify against the release's checksums.txt before extracting ---
+sums_url="https://github.com/${REPO}/releases/download/v${version}/checksums.txt"
+curl -fsSL "$sums_url" -o "${tmp}/checksums.txt" || fail "download failed: ${sums_url}"
+if command -v sha256sum >/dev/null 2>&1; then
+	actual=$(sha256sum "${tmp}/${asset}" | cut -d' ' -f1)
+elif command -v shasum >/dev/null 2>&1; then
+	actual=$(shasum -a 256 "${tmp}/${asset}" | cut -d' ' -f1)
+else
+	fail "sha256sum or shasum is required to verify the download"
+fi
+expected=$(grep "  ${asset}\$" "${tmp}/checksums.txt" | cut -d' ' -f1)
+[ -n "$expected" ] || fail "no entry for ${asset} in checksums.txt"
+[ "$actual" = "$expected" ] || fail "checksum mismatch for ${asset} (expected ${expected}, got ${actual})"
+echo "install: checksum verified"
+
 tar -xzf "${tmp}/${asset}" -C "$tmp"
 install -m 0755 "${tmp}/${BIN}" "${dest}/${BIN}" 2>/dev/null ||
 	{ mv "${tmp}/${BIN}" "${dest}/${BIN}" && chmod 0755 "${dest}/${BIN}"; }
