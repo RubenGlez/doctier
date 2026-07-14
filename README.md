@@ -26,6 +26,10 @@ fail-closed, to let a private doc be committed in cleartext.
 > filters, fail-closed checks, merge driver, ephemeral GC, work-state-aware
 > `doctier agents` — works end-to-end and ships as signed, notarized binaries.
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="doctier demo: one manifest classifies the docs, git stores age ciphertext, the worktree reads plaintext, doctier check passes" width="830">
+</p>
+
 ## Why it exists
 
 AI coding workflows generate a lot of documents alongside the code: product
