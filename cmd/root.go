@@ -25,6 +25,7 @@ Commands:
   init                     Scaffold .doctier.yml, .gitattributes, hooks and filters
   check [--staged|--push]  Verify staged / working tree / pushed commits against the policy (fail-closed)
   status                   Show the effective classification of each document
+  doctor                   Health-check this clone's setup (drivers, hooks, key, ciphertext)
   agents [--write]         Emit a tier-aware context block for AGENTS.md / CLAUDE.md
   gc [--trigger T]         Collect expired ephemeral docs (ttl|worktree|pr-merge|branch|all)
   grant [<ssh-pubkey>]     Add a recipient and re-encrypt private docs; with no
@@ -53,6 +54,8 @@ func Execute(args []string) int {
 		err = runCheck(args[1:])
 	case "status":
 		err = runStatus(args[1:])
+	case "doctor":
+		err = runDoctor(args[1:])
 	case "agents":
 		err = runAgents(args[1:])
 	case "gc":

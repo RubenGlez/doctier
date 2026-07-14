@@ -210,21 +210,30 @@ func resyncPrivate(root string, m *config.Manifest) error {
 }
 
 func ensureAttributes(root string, m *config.Manifest) error {
+	return ensureBlock(filepath.Join(root, ".gitattributes"), expectedAttrLines(m))
+}
+
+// expectedAttrLines is the .gitattributes managed block the manifest implies:
+// one `<pat> filter=doctier diff=doctier merge=doctier` line per private,
+// non-local rule. init writes these; doctor checks the block still matches them
+// (a clone init'd before merge=doctier landed carries a stale line).
+//
+// git parses .gitattributes patterns with fnmatch/gitignore rules — it does NOT
+// expand doublestar brace alternations like {a,b}. Writing such a pattern
+// verbatim produces a dead line: the filter never attaches and the "encrypted"
+// file commits as plaintext. Expand braces into one concrete gitattributes
+// pattern per alternative so every path the rule covers actually gets the
+// filter.
+func expectedAttrLines(m *config.Manifest) []string {
 	var lines []string
 	for _, r := range m.Docs {
 		if r.Visibility == "private" && !r.LocalOnly() {
-			// git parses .gitattributes patterns with fnmatch/gitignore rules — it
-			// does NOT expand doublestar brace alternations like {a,b}. Writing such
-			// a pattern verbatim produces a dead line: the filter never attaches and
-			// the "encrypted" file commits as plaintext. Expand braces into one
-			// concrete gitattributes pattern per alternative so every path the rule
-			// covers actually gets filter=doctier.
 			for _, pat := range expandBraces(r.Path) {
 				lines = append(lines, fmt.Sprintf("%s filter=doctier diff=doctier merge=doctier", pat))
 			}
 		}
 	}
-	return ensureBlock(filepath.Join(root, ".gitattributes"), lines)
+	return lines
 }
 
 // expandBraces expands a single level of doublestar brace alternation
@@ -298,28 +307,33 @@ func ensureIgnores(root string, m *config.Manifest) error {
 	return ensureBlock(filepath.Join(root, ".gitignore"), lines)
 }
 
+// doctierConfig is the git config init installs so private docs encrypt, diff
+// and merge for key holders. doctor checks each key against these exact values,
+// so the setup init writes and the setup doctor audits can never drift.
+//
+//   - required=true fails the clean filter closed rather than committing
+//     plaintext when doctier is missing.
+//   - textconv gives readable local diffs. Never add diff.doctier.cachetextconv:
+//     it would cache the decrypted plaintext in git notes inside the repo.
+//   - the merge driver 3-way merges the plaintext: age ciphertext is
+//     randomized, so without it ANY two branches touching the same private doc
+//     conflict as interleaved base64.
+var doctierConfig = []struct{ key, value string }{
+	{"filter.doctier.clean", "doctier filter clean %f"},
+	{"filter.doctier.smudge", "doctier filter smudge %f"},
+	{"filter.doctier.required", "true"},
+	{"diff.doctier.textconv", "doctier textconv"},
+	{"merge.doctier.name", "doctier 3-way merge for age-encrypted docs"},
+	{"merge.doctier.driver", "doctier merge %O %A %B %P"},
+}
+
 func configureFilters() error {
-	if err := gitx.ConfigSet("filter.doctier.clean", "doctier filter clean %f"); err != nil {
-		return err
+	for _, c := range doctierConfig {
+		if err := gitx.ConfigSet(c.key, c.value); err != nil {
+			return err
+		}
 	}
-	if err := gitx.ConfigSet("filter.doctier.smudge", "doctier filter smudge %f"); err != nil {
-		return err
-	}
-	if err := gitx.ConfigSet("filter.doctier.required", "true"); err != nil {
-		return err
-	}
-	// Readable diffs for key holders. Never enable diff.doctier.cachetextconv:
-	// it would cache the decrypted plaintext in git notes inside the repo.
-	if err := gitx.ConfigSet("diff.doctier.textconv", "doctier textconv"); err != nil {
-		return err
-	}
-	// 3-way merges for key holders: age ciphertext is randomized, so without a
-	// driver ANY two branches touching the same private doc conflict as
-	// interleaved base64.
-	if err := gitx.ConfigSet("merge.doctier.name", "doctier 3-way merge for age-encrypted docs"); err != nil {
-		return err
-	}
-	return gitx.ConfigSet("merge.doctier.driver", "doctier merge %O %A %B %P")
+	return nil
 }
 
 func installHooks() error {
