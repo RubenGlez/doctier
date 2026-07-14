@@ -20,6 +20,7 @@ Read these for project context:
 - `.harness/engineering/architecture.md`
 - `.harness/engineering/features/branch-ephemeral-scope.md`
 - `.harness/engineering/features/work-state-agents-filtering.md`
+- `.harness/product/announcements-2026-07.md`
 - `.harness/product/competitors.md`
 - `.harness/product/product.md`
 - `.harness/product/roadmap.md`
