@@ -97,6 +97,7 @@ recipients_file: .doctier/recipients.txt   # who can read private docs
 | `doctier init` | Scaffold `.doctier.yml`, `.gitattributes`, `.gitignore`, hooks and the clean/smudge filter. |
 | `doctier check [--staged\|--push]` | Fail-closed policy check: the index (CI), staged files (pre-commit) or pushed commit trees (pre-push). |
 | `doctier status` | Show the effective classification of each document. |
+| `doctier doctor` | Health-check this clone: the git filter/diff/merge drivers, `.gitattributes` sync, hooks, recipients, key availability, and that every tracked private file is intact ciphertext. Exits non-zero on any problem, so it works as a CI gate. |
 | `doctier unlock` | Decrypt private docs from the index into the working tree — for fresh clones and headless/CI runs (needs a key). |
 | `doctier cat <path>` | Print one private doc's plaintext to stdout without writing it to disk (needs a key). |
 | `doctier agents [--write] [--all]` | Emit a tier-aware context block for `AGENTS.md` / `CLAUDE.md` (print, or `--write` to maintain a managed block). Ephemerals are listed only while in flight for the current work unit; `--all` lists every one. |
