@@ -24,8 +24,9 @@ func runUnlock(args []string) error {
 
 Decrypt every private tracked file from the index into the working tree. Use it
 after cloning (nothing re-runs the smudge filter on an already-checked-out
-tree) or in a headless run with $DOCTIER_IDENTITY set. Files already plaintext
-in the working tree are left untouched.`)
+tree) or in a headless run with $DOCTIER_SSH_KEY set to a path or inline PEM
+(granting a headless environment access: docs/agents.md). Files already
+plaintext in the working tree are left untouched.`)
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -35,7 +36,10 @@ in the working tree are left untouched.`)
 	}
 	id, err := agex.LoadIdentity("")
 	if err != nil {
-		return fmt.Errorf("unlock: no usable key: %w (set $DOCTIER_IDENTITY to a path or inline PEM)", err)
+		// The headless/agent case deserves the full pointer: a key generated
+		// here cannot self-serve (it can't decrypt blobs encrypted before it
+		// was a recipient), which is easy to burn time discovering.
+		return fmt.Errorf("unlock: no usable key: %w\n  access is granted by an existing recipient running `doctier grant \"<your pubkey>\"` — a key added here cannot decrypt existing docs; see docs/agents.md", err)
 	}
 	files, err := gitx.TrackedFiles()
 	if err != nil {
@@ -82,7 +86,7 @@ in the working tree are left untouched.`)
 		fmt.Printf("  (%d file(s) already plaintext in the working tree — left untouched)\n", kept)
 	}
 	if failed > 0 {
-		return fmt.Errorf("%d file(s) could not be decrypted with this key", failed)
+		return fmt.Errorf("%d file(s) could not be decrypted with this key — it is not among their recipients; an existing recipient must run `doctier grant \"<this key.pub>\"` and commit, then pull here (see docs/agents.md)", failed)
 	}
 	return nil
 }
@@ -121,11 +125,11 @@ read-only path for an agent or script that only needs to read a doc.`)
 	}
 	id, err := agex.LoadIdentity("")
 	if err != nil {
-		return fmt.Errorf("cat: no usable key: %w", err)
+		return fmt.Errorf("cat: no usable key: %w\n  access is granted by an existing recipient running `doctier grant \"<your pubkey>\"` — a key added here cannot decrypt existing docs; see docs/agents.md", err)
 	}
 	pt, err := agex.Decrypt(blob, id)
 	if err != nil {
-		return fmt.Errorf("cat: decrypt %s: %w", rel, err)
+		return fmt.Errorf("cat: decrypt %s: %w — this key is not among the doc's recipients; an existing recipient must grant it (see docs/agents.md)", rel, err)
 	}
 	_, err = os.Stdout.Write(pt)
 	return err

@@ -166,6 +166,13 @@ in `.git`, so they don't travel with the clone. To get to plaintext:
 working tree, so it is safe to re-run at any time. To read a single doc without
 setup, `doctier cat <path>` prints its plaintext to stdout.
 
+The same applies to headless environments — a CI job or a remote coding agent
+has no granted key, so private docs stay ciphertext there (if an agent ever
+pastes you an `AGE ENCRYPTED FILE` block, this is why). To deliberately give
+such an environment read access — a dedicated key, granted by an existing
+recipient, provisioned as a secret — see
+[docs/agents.md](docs/agents.md).
+
 ## Walkthrough
 
 A repo with four documents, one per cell of the matrix:
@@ -267,7 +274,8 @@ so it is what makes the guarantee hold for every contributor. CI also drives the
 
 Copy-paste recipes for [GitHub Actions](docs/ci/github-actions.yml)
 and [GitLab CI](docs/ci/gitlab-ci.yml); neither needs your age key (check and gc
-never decrypt).
+never decrypt). If a CI job or agent *should* read private docs, that is a
+separate, deliberate grant — see [docs/agents.md](docs/agents.md).
 
 ## Known limitations
 
