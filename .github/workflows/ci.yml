@@ -29,6 +29,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # Go's equivalent of the `pnpm audit` gate used across the JS repos.
+      # govulncheck is call-graph aware: it only fails on advisories this code
+      # actually reaches, so it does not flag unreachable ones in dependencies.
+      - name: Vulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
       # Dogfood the policy: doctier's own private docs must be encrypted at rest.
       # The repo ships them as ciphertext, so this passes without any key — a key
       # is only needed to READ them, not to verify they are encrypted.
