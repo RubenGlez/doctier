@@ -22,7 +22,8 @@ fail-closed, to let a private doc be committed in cleartext.
 
 > Status: **early (v0.x), actively developed.** The core — manifest, age clean/smudge
 > filters, fail-closed checks, merge driver, ephemeral GC, work-state-aware
-> `doctier agents` — works end-to-end and ships as signed, notarized binaries.
+> `doctier agents` — works end-to-end. Release artifacts include checksums;
+> macOS binaries are additionally signed and notarized.
 
 <p align="center">
   <img src="docs/assets/demo.gif" alt="doctier demo: one manifest classifies the docs, git stores age ciphertext, the worktree reads plaintext, doctier check passes" width="830">
@@ -51,10 +52,10 @@ or shared), committing docs to a working branch and deleting them by hand later
 
 `doctier` builds the **two missing axes on top of git** instead of inventing a new
 store, and it was designed from the start for **coding agents working in parallel
-git worktrees**. Because tracked docs — public *and* private (encrypted) — travel
-to every worktree through git's own checkout, an agent spawned in a fresh worktree
-sees exactly the docs it should, with private ones already decrypted in its working
-tree, and nothing extra to set up per worktree.
+git worktrees**. Tracked docs — public *and* private (encrypted) — travel to every
+worktree through git's own checkout. On Linux and macOS, configured filters can
+decrypt private docs during checkout; on Windows, `doctier unlock` materializes
+them with an owner-only DACL after checkout leaves them encrypted.
 
 ## How it works
 
@@ -124,9 +125,8 @@ curl -fsSL https://raw.githubusercontent.com/RubenGlez/doctier/main/install.sh |
 go install github.com/rubenglez/doctier@latest
 ```
 
-On Windows, download the `windows_amd64` or `windows_arm64` ZIP and
-`checksums.txt` from the Releases page, verify it, then place `doctier.exe` on
-your user `PATH`:
+On x64 Windows, download the `windows_amd64` ZIP and `checksums.txt` from the
+Releases page, verify it, then place `doctier.exe` on your user `PATH`:
 
 ```powershell
 Get-FileHash .\doctier_*_windows_amd64.zip -Algorithm SHA256
@@ -145,9 +145,11 @@ Gatekeeper runs them without a security prompt.
 
 Windows requires Git for Windows. Doctier installs standard extensionless Git
 hooks with an `sh` shebang; Git for Windows supplies and invokes that shell.
-Decrypted private files receive a protected NTFS DACL granting access only to
-the current Windows user. Windows release ZIPs are checksum-verified artifacts;
-they are not Authenticode-signed yet.
+For security, checkout keeps private files encrypted on Windows; run `doctier
+unlock` to write plaintext with a protected NTFS DACL granting access only to
+the current user. Windows release ZIPs are checksum-verified artifacts, but are
+not Authenticode-signed. Windows ARM64 remains experimental and is not published
+until it has been validated on native ARM64 hardware or a runner.
 
 ## Quick start
 
@@ -161,10 +163,11 @@ doctier check
 ```
 
 Decryption uses your SSH private key (`$DOCTIER_SSH_KEY`, else `~/.ssh/id_ed25519`
-or `~/.ssh/id_rsa`). The key must be passphrase-less: git filters cannot prompt,
-so a passphrase-protected key leaves private docs encrypted in your worktree (you
-get a warning on checkout and from `doctier status`). Point `$DOCTIER_SSH_KEY` at
-a dedicated key if your main one has a passphrase.
+or `~/.ssh/id_rsa`). On Linux and macOS the key must be passphrase-less because
+git filters cannot prompt; a passphrase-protected key leaves private docs
+encrypted. Windows checkout always leaves them encrypted so `doctier unlock` can
+apply the DACL before writing plaintext. Point `$DOCTIER_SSH_KEY` at a dedicated
+key if your main one has a passphrase.
 
 ## Joining a repo that already uses doctier
 
@@ -173,7 +176,8 @@ ENCRYPTED FILE-----` blocks) — expected, not broken: the filter and hooks live
 in `.git`, so they don't travel with the clone. To get to plaintext:
 
 1. Install doctier and run `doctier init` in the clone — it wires the filter
-   and hooks so future checkouts decrypt automatically.
+   and hooks. On Linux and macOS, future checkouts can decrypt automatically;
+   Windows checkouts intentionally remain encrypted until `doctier unlock`.
 2. Get granted: send your `~/.ssh/id_ed25519.pub` to someone who already has
    access; they run `doctier grant "<your key>"` and commit the result. You
    cannot self-serve by adding your own key — it can't decrypt blobs that were
@@ -240,8 +244,9 @@ What happens as you work:
 - **`docs/architecture.md`** — committed as normal plaintext. Travels to every
   clone and worktree.
 - **`docs/strategy/roadmap.md`** — the clean filter encrypts it on `git add`, so
-  the blob in git is age ciphertext; the smudge filter decrypts it on checkout, so
-  it is plaintext in your working tree. Grant a teammate with
+  the blob in git is age ciphertext. On Linux and macOS the smudge filter decrypts
+  it on checkout; on Windows checkout keeps ciphertext and `doctier unlock`
+  writes the protected plaintext. Grant a teammate with
   `doctier grant "$(cat their_key.pub)"` and it is re-encrypted to include them.
 - **`feature-x.prd.md`** — committed as plaintext and reviewed inside the PR. When
   the PR merges, the `post-merge` hook (or CI) runs `doctier gc --trigger pr-merge`,
@@ -340,8 +345,9 @@ separate, deliberate grant — see [docs/agents.md](docs/agents.md).
   a GUI git client's PATH lacks the install dir (e.g. `~/.local/bin`) — checkouts and
   adds touching private files fail with git's opaque "external filter ... failed".
   Fix the client's PATH, or temporarily `git config filter.doctier.required false`.
-- **Windows requires Git for Windows.** Native Windows builds, filters, hooks,
-  encryption and owner-only plaintext ACLs are covered in CI. WSL remains a
+- **x64 Windows requires Git for Windows.** Native Windows builds, filters,
+  hooks, secure checkout and owner-only plaintext ACLs are covered in CI.
+  Windows ARM64 is not published until native validation exists. WSL remains a
   separate Linux environment and uses the Linux binary.
 
 Encryption is age-only by design (a separate private-repo backend is an explicit

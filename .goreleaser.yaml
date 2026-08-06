@@ -15,6 +15,11 @@ builds:
     goarch:
       - amd64
       - arm64
+    # Windows ARM64 remains unpublished until it is exercised on a native
+    # ARM64 runner or physical machine rather than only cross-compiled.
+    ignore:
+      - goos: windows
+        goarch: arm64
     flags:
       - -trimpath
     ldflags:

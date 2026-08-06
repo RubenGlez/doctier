@@ -56,6 +56,11 @@ plaintext in the working tree are left untouched.`)
 		// uncommitted edits (an earlier unlock or a smudged checkout, then work).
 		// Overwriting it with the index version would silently destroy that work.
 		if cur, err := os.ReadFile(dest); err == nil && !agex.IsEncrypted(cur) {
+			// Do not overwrite uncommitted plaintext, but repair permissions left
+			// by older Windows versions that decrypted during smudge.
+			if err := restrictToCurrentUser(dest); err != nil {
+				return fmt.Errorf("protect existing plaintext %s: %w", f, err)
+			}
 			kept++
 			continue
 		}

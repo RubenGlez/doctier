@@ -3,11 +3,70 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"unsafe"
 
+	"filippo.io/age"
+	"filippo.io/age/agessh"
 	"golang.org/x/sys/windows"
+
+	"github.com/rubenglez/doctier/internal/agex"
 )
+
+func TestWindowsSmudgeLeavesCiphertextForSecureUnlock(t *testing.T) {
+	privPEM, pubLine := keyPair(t)
+	recip, err := agessh.ParseRecipient(pubLine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err := agex.Encrypt([]byte("secret\n"), []age.Recipient{recip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("DOCTIER_SSH_KEY", "")
+	t.Setenv("DOCTIER_IDENTITY", string(privPEM))
+
+	got, err := smudge("secret/doc.md", ct)
+	if err != nil {
+		t.Fatalf("smudge: %v", err)
+	}
+	if !agex.ValidCiphertext(got) {
+		t.Fatal("Windows smudge must leave ciphertext for doctier unlock to write with an owner-only DACL")
+	}
+}
+
+func TestUnlockHardensExistingPlaintextWithoutClobberingIt(t *testing.T) {
+	root := initRepo(t, privManifest)
+	privPEM, pubLine := keyPair(t)
+	write(t, root, ".doctier/recipients.txt", pubLine+"\n")
+	recip, err := agessh.ParseRecipient(pubLine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ct, err := agex.Encrypt([]byte("committed\n"), []age.Recipient{recip})
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "secret/doc.md", string(ct))
+	git(t, root, "add", "-A")
+	write(t, root, "secret/doc.md", "uncommitted work\n")
+
+	t.Setenv("DOCTIER_SSH_KEY", "")
+	t.Setenv("DOCTIER_IDENTITY", string(privPEM))
+	if err := runUnlock(nil); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "secret/doc.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "uncommitted work\n" {
+		t.Fatalf("unlock overwrote plaintext edits, got %q", got)
+	}
+	assertOwnerOnlyPermissions(t, filepath.Join(root, "secret/doc.md"))
+}
 
 func assertOwnerOnlyPermissions(t *testing.T, path string) {
 	t.Helper()

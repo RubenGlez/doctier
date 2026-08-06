@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 
 	"github.com/rubenglez/doctier/internal/agex"
 	"github.com/rubenglez/doctier/internal/config"
@@ -121,6 +122,14 @@ func runTextconv(args []string) error {
 func smudge(file string, ciphertext []byte) ([]byte, error) {
 	if !agex.IsEncrypted(ciphertext) {
 		// Never encrypted (e.g. added before the filter was configured).
+		return ciphertext, nil
+	}
+	if runtime.GOOS == "windows" {
+		// Git owns the smudge destination and creates it with inherited access
+		// before this process can return any bytes. Emitting plaintext here would
+		// therefore bypass the owner-only DACL boundary. Keep checkout encrypted;
+		// unlock owns the destination and can protect it before writing plaintext.
+		fmt.Fprintf(os.Stderr, "doctier: %s left encrypted on Windows; run `doctier unlock` to decrypt it securely\n", file)
 		return ciphertext, nil
 	}
 	// Fail open — emit ciphertext rather than failing the checkout — but never
