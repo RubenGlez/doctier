@@ -90,7 +90,7 @@ jobs:
           $bin = Join-Path $env:RUNNER_TEMP 'doctier-bin'
           $env:PATH = "$bin;$env:PATH"
           $key = Join-Path $env:RUNNER_TEMP 'doctier-test-key'
-          ssh-keygen -q -t ed25519 -N '""' -f $key
+          ssh-keygen -q -t ed25519 -N '' -f $key
           $env:DOCTIER_SSH_KEY = $key
 
           $source = Join-Path $env:RUNNER_TEMP 'secure-source'
