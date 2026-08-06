@@ -77,6 +77,7 @@ jobs:
               throw 'pre-commit hook did not reject an unclassified document'
             }
             Write-Host "pre-commit hook rejected the invalid commit (exit $commitExit)"
+            $global:LASTEXITCODE = 0
           } finally {
             Pop-Location
           }
