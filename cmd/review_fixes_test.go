@@ -138,13 +138,7 @@ func TestUnlockWritesOwnerOnlyPermissions(t *testing.T) {
 	if err := runUnlock(nil); err != nil {
 		t.Fatalf("unlock: %v", err)
 	}
-	info, err := os.Stat(filepath.Join(root, "secret/doc.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Fatalf("unlock must write 0600, got %o", perm)
-	}
+	assertOwnerOnlyPermissions(t, filepath.Join(root, "secret/doc.md"))
 }
 
 // gc must exit non-zero when a removal genuinely fails, instead of printing

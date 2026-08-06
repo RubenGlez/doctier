@@ -124,8 +124,30 @@ curl -fsSL https://raw.githubusercontent.com/RubenGlez/doctier/main/install.sh |
 go install github.com/rubenglez/doctier@latest
 ```
 
+On Windows, download the `windows_amd64` or `windows_arm64` ZIP and
+`checksums.txt` from the Releases page, verify it, then place `doctier.exe` on
+your user `PATH`:
+
+```powershell
+Get-FileHash .\doctier_*_windows_amd64.zip -Algorithm SHA256
+# Compare the hash with checksums.txt before extracting.
+New-Item -ItemType Directory -Force "$HOME\bin" | Out-Null
+Expand-Archive .\doctier_*_windows_amd64.zip -DestinationPath "$HOME\bin" -Force
+$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if (($userPath -split ';') -notcontains "$HOME\bin") {
+  [Environment]::SetEnvironmentVariable('Path', "$userPath;$HOME\bin", 'User')
+}
+# Open a new terminal, then run: doctier version
+```
+
 macOS binaries are signed with a Developer ID certificate and notarized by Apple, so
 Gatekeeper runs them without a security prompt.
+
+Windows requires Git for Windows. Doctier installs standard extensionless Git
+hooks with an `sh` shebang; Git for Windows supplies and invokes that shell.
+Decrypted private files receive a protected NTFS DACL granting access only to
+the current Windows user. Windows release ZIPs are checksum-verified artifacts;
+they are not Authenticode-signed yet.
 
 ## Quick start
 
@@ -318,9 +340,9 @@ separate, deliberate grant — see [docs/agents.md](docs/agents.md).
   a GUI git client's PATH lacks the install dir (e.g. `~/.local/bin`) — checkouts and
   adds touching private files fail with git's opaque "external filter ... failed".
   Fix the client's PATH, or temporarily `git config filter.doctier.required false`.
-- **Windows is not supported.** The hooks are `sh` scripts and nothing is tested
-  under Git-for-Windows, so no Windows binaries are shipped (WSL works — it is
-  just Linux).
+- **Windows requires Git for Windows.** Native Windows builds, filters, hooks,
+  encryption and owner-only plaintext ACLs are covered in CI. WSL remains a
+  separate Linux environment and uses the Linux binary.
 
 Encryption is age-only by design (a separate private-repo backend is an explicit
 non-goal).

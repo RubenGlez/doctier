@@ -8,13 +8,10 @@ project_name: doctier
 builds:
   - env:
       - CGO_ENABLED=0
-    # No windows: the hooks are sh scripts and nothing is tested under
-    # Git-for-Windows — shipping untested binaries of a fail-closed security
-    # tool is worse than not shipping them. Re-add with a Windows CI job when
-    # there is demand.
     goos:
       - linux
       - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -36,6 +33,10 @@ builds:
 archives:
   - formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

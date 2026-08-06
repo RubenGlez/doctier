@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,15 +37,48 @@ jobs:
       # govulncheck is call-graph aware: it only fails on advisories this code
       # actually reaches, so it does not flag unreachable ones in dependencies.
       - name: Vulncheck
+        if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       # Dogfood the policy: doctier's own private docs must be encrypted at rest.
       # The repo ships them as ciphertext, so this passes without any key — a key
       # is only needed to READ them, not to verify they are encrypted.
       - name: doctier check
+        if: runner.os == 'Linux'
         run: |
           go build -o /tmp/doctier .
           /tmp/doctier check
+
+      - name: Git for Windows hook smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:RUNNER_TEMP 'doctier-bin'
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          go build -o (Join-Path $bin 'doctier.exe') .
+          $env:PATH = "$bin;$env:PATH"
+          $repo = Join-Path $env:RUNNER_TEMP 'hook-smoke'
+          git init $repo
+          git -C $repo config user.name 'doctier-ci'
+          git -C $repo config user.email 'doctier-ci@example.invalid'
+          Push-Location $repo
+          try {
+            doctier init
+            Add-Content .doctier.yml "`npolicy:`n  uncovered: block"
+            Set-Content unclassified.md 'must be rejected'
+            git add unclassified.md
+            $ErrorActionPreference = 'Continue'
+            git commit -m 'must fail'
+            $commitExit = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($commitExit -eq 0) {
+              throw 'pre-commit hook did not reject an unclassified document'
+            }
+            Write-Host "pre-commit hook rejected the invalid commit (exit $commitExit)"
+          } finally {
+            Pop-Location
+          }
 
   # Dogfood the bundled GitHub Action (action/): installs the latest release
   # binary (checksum-verified) and runs `doctier check` on this repo.
