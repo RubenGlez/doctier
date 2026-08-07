@@ -55,6 +55,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $bin = Join-Path $env:RUNNER_TEMP 'doctier-bin'
           New-Item -ItemType Directory -Force $bin | Out-Null
           go build -o (Join-Path $bin 'doctier.exe') .
@@ -87,6 +88,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $bin = Join-Path $env:RUNNER_TEMP 'doctier-bin'
           $env:PATH = "$bin;$env:PATH"
           $key = Join-Path $env:RUNNER_TEMP 'doctier-test-key'
@@ -120,6 +122,8 @@ jobs:
 
           $clone = Join-Path $env:RUNNER_TEMP 'secure-clone'
           git clone -q $source $clone
+          git -C $clone config user.name 'doctier-ci'
+          git -C $clone config user.email 'doctier-ci@example.invalid'
           Push-Location $clone
           try {
             doctier init
