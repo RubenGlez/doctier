@@ -47,7 +47,11 @@ jobs:
           # Let codesign use the imported key without an interactive prompt.
           security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_pw" "$keychain" >/dev/null
           # Put our keychain first in the search list so codesign finds the identity.
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | sed s/\"//g)
+          existing_keychains=()
+          while IFS= read -r existing_keychain; do
+            existing_keychains+=("${existing_keychain//\"/}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "$keychain" "${existing_keychains[@]}"
           identity="$(security find-identity -v -p codesigning "$keychain" \
             | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)".*/\1/')"
           if [ -z "$identity" ]; then
