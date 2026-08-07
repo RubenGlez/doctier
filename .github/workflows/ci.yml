@@ -153,13 +153,17 @@ jobs:
             git merge merge-other
             $mergeExit = $LASTEXITCODE
             $ErrorActionPreference = 'Stop'
-            if ($mergeExit -eq 0) {
-              throw 'private merge unexpectedly resolved without a conflict'
-            }
-            $global:LASTEXITCODE = 0
-            if ((Get-Content secret/plan.md -Raw) -notmatch '<<<<<<< ours') {
-              throw 'private merge did not materialize plaintext conflict markers'
-            }
+          if ($mergeExit -eq 0) {
+            throw 'private merge unexpectedly resolved without a conflict'
+          }
+          $global:LASTEXITCODE = 0
+          if ((Get-Content secret/plan.md -Raw) -notmatch 'BEGIN AGE ENCRYPTED FILE') {
+            throw 'private merge materialized plaintext before an owner-only DACL could be applied'
+          }
+          doctier unlock
+          if ((Get-Content secret/plan.md -Raw) -notmatch '<<<<<<< ours') {
+            throw 'private merge did not materialize plaintext conflict markers'
+          }
             $acl = Get-Acl secret/plan.md
             if (-not $acl.AreAccessRulesProtected) {
               throw 'private merge conflict inherited access rules'

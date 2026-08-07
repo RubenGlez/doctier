@@ -317,9 +317,9 @@ separate, deliberate grant — see [docs/agents.md](docs/agents.md).
   randomized, so two branches touching the same private doc always collide; the
   `merge.doctier` driver (wired by `init`) decrypts both sides, 3-way merges the
   plaintext and re-encrypts the result. Real conflicts appear as plaintext
-  markers in the working tree (the index keeps ciphertext); on Windows the
-  temporary plaintext and conflict output use the same owner-only DACL boundary
-  as `doctier unlock`. On a keyless machine the driver reports a conflict and
+  markers in the working tree (the index keeps ciphertext). On Windows the
+  driver keeps conflict output encrypted until `doctier unlock` materializes
+  the markers behind an owner-only DACL. On a keyless machine it reports a conflict and
   tells you how to keep one side
   (`git checkout --ours/--theirs`).
 - age has no authenticated associated data: encrypted blobs are not bound to
