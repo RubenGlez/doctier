@@ -17,10 +17,13 @@ Read these for project context:
 - `.harness/adr/0010-yaml-first-match-manifest.md`
 - `.harness/adr/0011-branch-ephemeral-scope.md`
 - `.harness/adr/0012-macos-native-codesign-on-macos-runner.md`
+- `.harness/adr/0013-windows-owner-only-materialization.md`
 - `.harness/engineering/architecture.md`
 - `.harness/engineering/features/branch-ephemeral-scope.md`
+- `.harness/engineering/features/windows-x64-support.md`
 - `.harness/engineering/features/work-state-agents-filtering.md`
 - `.harness/product/announcements-2026-07.md`
+- `.harness/product/announcements-2026-08.md`
 - `.harness/product/competitors.md`
 - `.harness/product/product.md`
 - `.harness/product/roadmap.md`

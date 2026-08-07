@@ -110,7 +110,7 @@ func runMerge(args []string) error {
 			if err := os.WriteFile(current, ct, 0o600); err != nil {
 				return err
 			}
-			return fmt.Errorf("merge: conflicts in %s — run `doctier unlock` to materialize protected plaintext conflict markers, resolve them, then git add", path)
+			return fmt.Errorf("merge: conflicts in %s: run `doctier unlock` to materialize protected plaintext conflict markers, resolve them, then git add", path)
 		}
 		// Only the worktree receives this; the index keeps the three encrypted
 		// stages, so plaintext markers here leak nothing into git. The merge
