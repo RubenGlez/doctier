@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -73,9 +74,10 @@ func TestMergeDriverMergesEncryptedSidesCleanly(t *testing.T) {
 	}
 }
 
-// Real conflicts surface as PLAINTEXT conflict markers plus a non-zero exit,
-// not interleaved base64 armor.
-func TestMergeDriverLeavesPlaintextConflictMarkers(t *testing.T) {
+// Real conflicts return a non-zero exit and resolvable plaintext markers. On
+// Windows the driver encrypts those markers until unlock can protect the real
+// worktree path; other platforms can return them directly.
+func TestMergeDriverProducesResolvableConflictMarkers(t *testing.T) {
 	root := initRepo(t, privManifest)
 	o, a, b, privPEM := mergeFixture(t, root,
 		"line1\n", "line1 ours\n", "line1 theirs\n")
@@ -90,13 +92,31 @@ func TestMergeDriverLeavesPlaintextConflictMarkers(t *testing.T) {
 	if readErr != nil {
 		t.Fatal(readErr)
 	}
-	if !strings.Contains(string(got), "<<<<<<< ours") || !strings.Contains(string(got), ">>>>>>> theirs") {
-		t.Fatalf("expected plaintext conflict markers, got:\n%s", got)
+	if runtime.GOOS == "windows" {
+		if !agex.ValidCiphertext(got) {
+			t.Fatalf("Windows conflict output must stay encrypted until unlock, got:\n%s", got)
+		}
+		if !strings.Contains(err.Error(), "doctier unlock") {
+			t.Fatalf("Windows conflict error must explain how to reveal markers, got: %v", err)
+		}
+		id, loadErr := agex.LoadIdentity("")
+		if loadErr != nil {
+			t.Fatal(loadErr)
+		}
+		got, readErr = agex.Decrypt(got, id)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
 	}
-	if agex.IsEncrypted(got) {
+	if !strings.Contains(string(got), "<<<<<<< ours") || !strings.Contains(string(got), ">>>>>>> theirs") {
+		t.Fatalf("expected resolvable conflict markers, got:\n%s", got)
+	}
+	if runtime.GOOS != "windows" && agex.IsEncrypted(got) {
 		t.Fatal("conflict output must be plaintext, not armor")
 	}
-	assertOwnerOnlyPermissions(t, a)
+	if runtime.GOOS != "windows" {
+		assertOwnerOnlyPermissions(t, a)
+	}
 }
 
 // Without a key the driver must fail (conflict) with instructions and leave
