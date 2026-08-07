@@ -75,3 +75,61 @@ jobs:
           MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+
+  verify-windows-release:
+    needs: goreleaser
+    runs-on: windows-latest
+    steps:
+      - name: Install and verify published Windows x64 archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $download = Join-Path $env:RUNNER_TEMP 'doctier-release'
+          New-Item -ItemType Directory -Force $download | Out-Null
+
+          gh release download $env:RELEASE_TAG --repo $env:GH_REPO `
+            --pattern 'doctier_*_windows_amd64.zip' `
+            --pattern 'checksums.txt' `
+            --dir $download
+
+          $archives = @(Get-ChildItem $download -Filter 'doctier_*_windows_amd64.zip')
+          if ($archives.Count -ne 1) {
+            throw "expected one Windows x64 archive, found $($archives.Count)"
+          }
+          $archive = $archives[0]
+          $expected = @(Get-Content (Join-Path $download 'checksums.txt') | ForEach-Object {
+            $parts = $_ -split '\s+', 2
+            if ($parts.Count -eq 2 -and $parts[1].Trim() -eq $archive.Name) {
+              $parts[0].ToLowerInvariant()
+            }
+          })
+          if ($expected.Count -ne 1) {
+            throw "checksum entry for $($archive.Name) was not found exactly once"
+          }
+          $actual = (Get-FileHash $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected[0]) {
+            throw "checksum mismatch for $($archive.Name)"
+          }
+
+          $expanded = Join-Path $env:RUNNER_TEMP 'doctier-expanded'
+          Expand-Archive $archive.FullName -DestinationPath $expanded
+          $executables = @(Get-ChildItem $expanded -Recurse -Filter 'doctier.exe')
+          if ($executables.Count -ne 1) {
+            throw "expected one doctier.exe, found $($executables.Count)"
+          }
+          $install = Join-Path $env:RUNNER_TEMP 'doctier-installed'
+          New-Item -ItemType Directory -Force $install | Out-Null
+          Copy-Item $executables[0].FullName (Join-Path $install 'doctier.exe')
+          $env:PATH = "$install;$env:PATH"
+
+          $version = (doctier version).Trim()
+          $expectedVersion = $env:RELEASE_TAG.TrimStart('v')
+          if ($version -ne "doctier $expectedVersion") {
+            throw "installed binary reported '$version'; expected 'doctier $expectedVersion'"
+          }
+          doctier --help | Out-Null
