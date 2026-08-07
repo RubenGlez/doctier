@@ -3,8 +3,11 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -66,6 +69,60 @@ func TestUnlockHardensExistingPlaintextWithoutClobberingIt(t *testing.T) {
 		t.Fatalf("unlock overwrote plaintext edits, got %q", got)
 	}
 	assertOwnerOnlyPermissions(t, filepath.Join(root, "secret/doc.md"))
+}
+
+func TestUnlockDecryptsEncryptedMergeConflictWithoutStageZero(t *testing.T) {
+	root := initRepo(t, privManifest)
+	o, a, b, privPEM := mergeFixture(t, root,
+		"line1\n", "line1 ours\n", "line1 theirs\n")
+	stages := [3]string{
+		gitOut(t, root, "hash-object", "-w", "--no-filters", o),
+		gitOut(t, root, "hash-object", "-w", "--no-filters", a),
+		gitOut(t, root, "hash-object", "-w", "--no-filters", b),
+	}
+	t.Setenv("DOCTIER_SSH_KEY", "")
+	t.Setenv("DOCTIER_IDENTITY", string(privPEM))
+
+	if err := runMerge([]string{o, a, b, "secret/doc.md"}); err == nil {
+		t.Fatal("conflicting merge must return an error")
+	}
+	conflictCiphertext, err := os.ReadFile(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agex.ValidCiphertext(conflictCiphertext) {
+		t.Fatal("Windows merge conflict must remain encrypted before unlock")
+	}
+	dest := filepath.Join(root, "secret", "doc.md")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, conflictCiphertext, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var indexInfo strings.Builder
+	for i, sha := range stages {
+		fmt.Fprintf(&indexInfo, "100644 %s %d\tsecret/doc.md\n", sha, i+1)
+	}
+	cmd := exec.Command("git", "update-index", "--index-info")
+	cmd.Dir = root
+	cmd.Stdin = strings.NewReader(indexInfo.String())
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create unmerged index: %v\n%s", err, out)
+	}
+
+	if err := runUnlock(nil); err != nil {
+		t.Fatalf("unlock merge conflict: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "<<<<<<< ours") || !strings.Contains(string(got), ">>>>>>> theirs") {
+		t.Fatalf("expected plaintext conflict markers after unlock, got:\n%s", got)
+	}
+	assertOwnerOnlyPermissions(t, dest)
 }
 
 func assertOwnerOnlyPermissions(t *testing.T, path string) {

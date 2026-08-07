@@ -17,8 +17,9 @@ import (
 //   - a headless/CI/agent run, where the key arrives via $DOCTIER_IDENTITY and
 //     there is no interactive checkout at all.
 //
-// It reads each file's ciphertext from the index (which always holds the
-// encrypted blob) and writes plaintext to disk.
+// It normally reads each file's ciphertext from the index. During a merge
+// conflict the index has three stages instead of one canonical blob, so it
+// decrypts the worktree ciphertext produced by the merge driver instead.
 func runUnlock(args []string) error {
 	fs := newFlagSet("unlock", `usage: doctier unlock
 
@@ -66,7 +67,13 @@ plaintext in the working tree are left untouched.`)
 		}
 		blob, err := gitx.StagedBlob(f)
 		if err != nil {
-			continue
+			// An unmerged path has no stage-0 blob. On Windows the merge driver
+			// deliberately leaves its conflict markers encrypted in the worktree
+			// so this command can protect the final path before decrypting it.
+			blob, err = os.ReadFile(dest)
+			if err != nil {
+				continue
+			}
 		}
 		if !agex.IsEncrypted(blob) {
 			continue // already plaintext in the index (added before the filter)
