@@ -4,13 +4,18 @@ on:
   push:
     branches: ["**"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   build-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,15 +38,148 @@ jobs:
       # govulncheck is call-graph aware: it only fails on advisories this code
       # actually reaches, so it does not flag unreachable ones in dependencies.
       - name: Vulncheck
+        if: runner.os == 'Linux'
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       # Dogfood the policy: doctier's own private docs must be encrypted at rest.
       # The repo ships them as ciphertext, so this passes without any key — a key
       # is only needed to READ them, not to verify they are encrypted.
       - name: doctier check
+        if: runner.os == 'Linux'
         run: |
           go build -o /tmp/doctier .
           /tmp/doctier check
+
+      - name: Git for Windows hook smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $bin = Join-Path $env:RUNNER_TEMP 'doctier-bin'
+          New-Item -ItemType Directory -Force $bin | Out-Null
+          go build -o (Join-Path $bin 'doctier.exe') .
+          $env:PATH = "$bin;$env:PATH"
+          $repo = Join-Path $env:RUNNER_TEMP 'hook-smoke'
+          git init $repo
+          git -C $repo config user.name 'doctier-ci'
+          git -C $repo config user.email 'doctier-ci@example.invalid'
+          Push-Location $repo
+          try {
+            doctier init
+            Add-Content .doctier.yml "`npolicy:`n  uncovered: block"
+            Set-Content unclassified.md 'must be rejected'
+            git add unclassified.md
+            $ErrorActionPreference = 'Continue'
+            git commit -m 'must fail'
+            $commitExit = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($commitExit -eq 0) {
+              throw 'pre-commit hook did not reject an unclassified document'
+            }
+            Write-Host "pre-commit hook rejected the invalid commit (exit $commitExit)"
+            $global:LASTEXITCODE = 0
+          } finally {
+            Pop-Location
+          }
+
+      - name: Secure Windows checkout smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $bin = Join-Path $env:RUNNER_TEMP 'doctier-bin'
+          $env:PATH = "$bin;$env:PATH"
+          $key = Join-Path $env:RUNNER_TEMP 'doctier-test-key'
+          ssh-keygen -q -t ed25519 -N '' -f $key
+          $env:DOCTIER_SSH_KEY = $key
+
+          $source = Join-Path $env:RUNNER_TEMP 'secure-source'
+          git init -q -b main $source
+          git -C $source config user.name 'doctier-ci'
+          git -C $source config user.email 'doctier-ci@example.invalid'
+          Push-Location $source
+          try {
+            doctier init
+            @'
+          version: 1
+          docs:
+            - path: "secret/**"
+              visibility: private
+              lifetime: durable
+          recipients_file: .doctier/recipients.txt
+          '@ | Set-Content .doctier.yml
+            doctier init
+            doctier grant (Get-Content "$key.pub" -Raw)
+            New-Item -ItemType Directory -Force secret | Out-Null
+            Set-Content secret/plan.md 'TOP SECRET'
+            git add -A
+            git commit -q -m 'add encrypted document'
+          } finally {
+            Pop-Location
+          }
+
+          $clone = Join-Path $env:RUNNER_TEMP 'secure-clone'
+          git clone -q $source $clone
+          git -C $clone config user.name 'doctier-ci'
+          git -C $clone config user.email 'doctier-ci@example.invalid'
+          Push-Location $clone
+          try {
+            doctier init
+            $doctier = (Join-Path $bin 'doctier.exe').Replace('\', '/')
+            git config --local filter.doctier.smudge "'$doctier' filter smudge %f"
+            Remove-Item secret/plan.md
+            git checkout -- secret/plan.md
+            $checkedOut = Get-Content secret/plan.md -Raw
+            if ($checkedOut -notmatch 'BEGIN AGE ENCRYPTED FILE') {
+              throw 'normal Windows checkout materialized plaintext before an owner-only DACL could be applied'
+            }
+            doctier unlock
+            if ((Get-Content secret/plan.md -Raw).Trim() -ne 'TOP SECRET') {
+              throw 'doctier unlock did not materialize the expected plaintext'
+            }
+
+            git switch -q -c merge-other
+            Set-Content secret/plan.md 'THEIRS'
+            git add secret/plan.md
+            git commit -q -m 'edit private document on other branch'
+            git switch -q main
+            doctier unlock
+            Set-Content secret/plan.md 'OURS'
+            git add secret/plan.md
+            git commit -q -m 'edit private document on main'
+            $ErrorActionPreference = 'Continue'
+            git merge merge-other
+            $mergeExit = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+          if ($mergeExit -eq 0) {
+            throw 'private merge unexpectedly resolved without a conflict'
+          }
+          $global:LASTEXITCODE = 0
+          if ((Get-Content secret/plan.md -Raw) -notmatch 'BEGIN AGE ENCRYPTED FILE') {
+            throw 'private merge materialized plaintext before an owner-only DACL could be applied'
+          }
+          doctier unlock
+          if ((Get-Content secret/plan.md -Raw) -notmatch '<<<<<<< ours') {
+            throw 'private merge did not materialize plaintext conflict markers'
+          }
+            $acl = Get-Acl secret/plan.md
+            if (-not $acl.AreAccessRulesProtected) {
+              throw 'private merge conflict inherited access rules'
+            }
+            $rules = @($acl.Access)
+            if ($rules.Count -ne 1) {
+              throw "private merge conflict has $($rules.Count) access rules; expected one current-user rule"
+            }
+            $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+            $ruleSid = $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+            if (-not $ruleSid.Equals($currentSid)) {
+              throw "private merge conflict grants $ruleSid; expected current user $currentSid"
+            }
+          } finally {
+            Pop-Location
+          }
 
   # Dogfood the bundled GitHub Action (action/): installs the latest release
   # binary (checksum-verified) and runs `doctier check` on this repo.

@@ -6,6 +6,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"filippo.io/age"
@@ -137,6 +138,12 @@ func TestCleanSmudgeRoundTrip(t *testing.T) {
 	got, err := smudge("secret.md", ct)
 	if err != nil {
 		t.Fatalf("smudge: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		if !agex.ValidCiphertext(got) {
+			t.Fatal("Windows smudge must keep ciphertext for secure unlock")
+		}
+		return
 	}
 	if string(got) != string(plaintext) {
 		t.Fatalf("round-trip mismatch: got %q want %q", got, plaintext)

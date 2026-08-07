@@ -17,8 +17,9 @@ import (
 //   - a headless/CI/agent run, where the key arrives via $DOCTIER_IDENTITY and
 //     there is no interactive checkout at all.
 //
-// It reads each file's ciphertext from the index (which always holds the
-// encrypted blob) and writes plaintext to disk.
+// It normally reads each file's ciphertext from the index. During a merge
+// conflict the index has three stages instead of one canonical blob, so it
+// decrypts the worktree ciphertext produced by the merge driver instead.
 func runUnlock(args []string) error {
 	fs := newFlagSet("unlock", `usage: doctier unlock
 
@@ -56,12 +57,23 @@ plaintext in the working tree are left untouched.`)
 		// uncommitted edits (an earlier unlock or a smudged checkout, then work).
 		// Overwriting it with the index version would silently destroy that work.
 		if cur, err := os.ReadFile(dest); err == nil && !agex.IsEncrypted(cur) {
+			// Do not overwrite uncommitted plaintext, but repair permissions left
+			// by older Windows versions that decrypted during smudge.
+			if err := restrictToCurrentUser(dest); err != nil {
+				return fmt.Errorf("protect existing plaintext %s: %w", f, err)
+			}
 			kept++
 			continue
 		}
 		blob, err := gitx.StagedBlob(f)
 		if err != nil {
-			continue
+			// An unmerged path has no stage-0 blob. On Windows the merge driver
+			// deliberately leaves its conflict markers encrypted in the worktree
+			// so this command can protect the final path before decrypting it.
+			blob, err = os.ReadFile(dest)
+			if err != nil {
+				continue
+			}
 		}
 		if !agex.IsEncrypted(blob) {
 			continue // already plaintext in the index (added before the filter)
@@ -72,11 +84,12 @@ plaintext in the working tree are left untouched.`)
 			failed++
 			continue
 		}
-		// 0600: this is deliberately-encrypted content landing on disk. Tighten
-		// before writing — WriteFile's perm only applies when creating, and the
-		// ciphertext copy usually already exists (wider) at dest.
-		_ = os.Chmod(dest, 0o600)
-		if err := os.WriteFile(dest, pt, 0o600); err != nil {
+		// This is deliberately-encrypted content landing on disk. Tighten the
+		// existing ciphertext path before writing plaintext. On Unix this is
+		// mode 0600; on Windows it is a protected DACL containing only the
+		// current user's SID. If the file is absent, create an empty placeholder
+		// first so no plaintext is ever present under inherited permissions.
+		if err := writeOwnerOnly(dest, pt); err != nil {
 			return err
 		}
 		n++

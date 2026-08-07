@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/rubenglez/doctier/internal/agex"
@@ -152,13 +153,21 @@ editing .doctier.yml to sync the generated artifacts with the rules.`)
 	}
 
 	fmt.Println("\nNext steps:")
-	fmt.Println("  1. Add recipients:  doctier grant \"$(cat ~/.ssh/id_ed25519.pub)\"")
+	if runtime.GOOS == "windows" {
+		fmt.Println("  1. Add recipients:  doctier grant (Get-Content $HOME\\.ssh\\id_ed25519.pub -Raw)")
+	} else {
+		fmt.Println("  1. Add recipients:  doctier grant \"$(cat ~/.ssh/id_ed25519.pub)\"")
+	}
 	fmt.Println("  2. Edit .doctier.yml to classify your documents, then re-run")
 	fmt.Println("     'doctier init' to sync .gitattributes/.gitignore with the rules.")
 	fmt.Println("  3. Verify:          doctier check")
 	fmt.Println("\nHeadless / CI / agent runs (no interactive key):")
 	fmt.Println("  • grant a dedicated key:  doctier grant \"<ci-agent-pubkey>\"")
-	fmt.Println("  • provide it at runtime:  export DOCTIER_IDENTITY=\"$(cat ci_key)\"  (path or inline PEM)")
+	if runtime.GOOS == "windows" {
+		fmt.Println("  • provide it at runtime:  $env:DOCTIER_SSH_KEY = '.\\ci_key'  (path or inline PEM)")
+	} else {
+		fmt.Println("  • provide it at runtime:  export DOCTIER_IDENTITY=\"$(cat ci_key)\"  (path or inline PEM)")
+	}
 	fmt.Println("  • decrypt the worktree:   doctier unlock     (or read one file: doctier cat <path>)")
 	return nil
 }
