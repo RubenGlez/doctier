@@ -96,6 +96,7 @@ func TestMergeDriverLeavesPlaintextConflictMarkers(t *testing.T) {
 	if agex.IsEncrypted(got) {
 		t.Fatal("conflict output must be plaintext, not armor")
 	}
+	assertOwnerOnlyPermissions(t, a)
 }
 
 // Without a key the driver must fail (conflict) with instructions and leave

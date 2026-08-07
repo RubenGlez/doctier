@@ -135,6 +135,40 @@ jobs:
             if ((Get-Content secret/plan.md -Raw).Trim() -ne 'TOP SECRET') {
               throw 'doctier unlock did not materialize the expected plaintext'
             }
+
+            git switch -q -c merge-other
+            Set-Content secret/plan.md 'THEIRS'
+            git add secret/plan.md
+            git commit -q -m 'edit private document on other branch'
+            git switch -q main
+            doctier unlock
+            Set-Content secret/plan.md 'OURS'
+            git add secret/plan.md
+            git commit -q -m 'edit private document on main'
+            $ErrorActionPreference = 'Continue'
+            git merge merge-other
+            $mergeExit = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($mergeExit -eq 0) {
+              throw 'private merge unexpectedly resolved without a conflict'
+            }
+            $global:LASTEXITCODE = 0
+            if ((Get-Content secret/plan.md -Raw) -notmatch '<<<<<<< ours') {
+              throw 'private merge did not materialize plaintext conflict markers'
+            }
+            $acl = Get-Acl secret/plan.md
+            if (-not $acl.AreAccessRulesProtected) {
+              throw 'private merge conflict inherited access rules'
+            }
+            $rules = @($acl.Access)
+            if ($rules.Count -ne 1) {
+              throw "private merge conflict has $($rules.Count) access rules; expected one current-user rule"
+            }
+            $currentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+            $ruleSid = $rules[0].IdentityReference.Translate([System.Security.Principal.SecurityIdentifier])
+            if (-not $ruleSid.Equals($currentSid)) {
+              throw "private merge conflict grants $ruleSid; expected current user $currentSid"
+            }
           } finally {
             Pop-Location
           }

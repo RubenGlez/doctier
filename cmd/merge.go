@@ -92,8 +92,10 @@ func runMerge(args []string) error {
 	}
 	if conflicted {
 		// Only the worktree receives this; the index keeps the three encrypted
-		// stages, so plaintext markers here leak nothing into git.
-		if err := os.WriteFile(current, merged, 0o600); err != nil {
+		// stages, so plaintext markers here leak nothing into git. The merge
+		// result is still sensitive plaintext on disk, so protect %A before
+		// writing it; Git uses that file as the worktree result.
+		if err := writeOwnerOnly(current, merged); err != nil {
 			return err
 		}
 		return conflictErr(path)
@@ -127,7 +129,9 @@ func merge3(contents [3][]byte) (merged []byte, conflicted bool, err error) {
 
 	files := [3]string{filepath.Join(tmp, "base"), filepath.Join(tmp, "ours"), filepath.Join(tmp, "theirs")}
 	for i, f := range files {
-		if err := os.WriteFile(f, contents[i], 0o600); err != nil {
+		// Encrypted sides have already been decrypted before merge3. Apply the
+		// platform security boundary before any plaintext reaches these files.
+		if err := writeOwnerOnly(f, contents[i]); err != nil {
 			return nil, false, err
 		}
 	}
