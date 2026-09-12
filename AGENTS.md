@@ -3,32 +3,18 @@
 
 Managed by doctier — do not edit between the markers.
 
-Read these for project context:
+Entry points (read these first):
 
-- `.harness/adr/0001-age-in-place-encryption.md`
-- `.harness/adr/0002-user-driven-classification.md`
-- `.harness/adr/0003-two-axis-visibility-lifetime-model.md`
-- `.harness/adr/0004-ephemeral-worktree-scope-only.md`
-- `.harness/adr/0005-standalone-cli-own-repo.md`
-- `.harness/adr/0006-ephemeral-not-gitignored-sensitive-local.md`
-- `.harness/adr/0007-go-single-static-binary.md`
-- `.harness/adr/0008-reuse-ssh-keys-as-age-recipients.md`
-- `.harness/adr/0009-pr-merge-via-generic-gc.md`
-- `.harness/adr/0010-yaml-first-match-manifest.md`
-- `.harness/adr/0011-branch-ephemeral-scope.md`
-- `.harness/adr/0012-macos-native-codesign-on-macos-runner.md`
-- `.harness/adr/0013-windows-owner-only-materialization.md`
 - `.harness/engineering/architecture.md`
-- `.harness/engineering/features/branch-ephemeral-scope.md`
-- `.harness/engineering/features/windows-x64-support.md`
-- `.harness/engineering/features/work-state-agents-filtering.md`
-- `.harness/product/announcements-2026-07.md`
-- `.harness/product/announcements-2026-08.md`
-- `.harness/product/competitors.md`
 - `.harness/product/product.md`
 - `.harness/product/roadmap.md`
-- `.harness/qa/adversarial-audit-2026-07-03.md`
-- `.harness/qa/report.md`
+
+Further docs, by directory:
+
+- `.harness/adr/` (13 docs)
+- `.harness/engineering/features/` (3 docs)
+- `.harness/product/` (3 docs)
+- `.harness/qa/` (2 docs)
 <!-- doctier:end -->
 
 ## Working in this repo

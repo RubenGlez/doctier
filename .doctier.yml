@@ -2,7 +2,24 @@ version: 1
 
 # .harness/ is the private doc store: encrypted in git, decrypted on checkout.
 # Prototype/spike code is sensitive scratch: never committed, dies with the worktree.
+# Entry points first (first match wins): the agent index lists these individually
+# and groups the rest of the durable tree by directory.
 docs:
+  - path: ".harness/engineering/architecture.md"
+    visibility: private
+    lifetime: durable
+    primary: true
+
+  - path: ".harness/product/product.md"
+    visibility: private
+    lifetime: durable
+    primary: true
+
+  - path: ".harness/product/roadmap.md"
+    visibility: private
+    lifetime: durable
+    primary: true
+
   - path: ".harness/**"
     visibility: private
     lifetime: durable
