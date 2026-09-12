@@ -83,6 +83,8 @@ func TestValidate(t *testing.T) {
 		{"scope on non-worktree trigger", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Expire: &Expire{On: "ttl", TTLDays: 5, Scope: "branch"}}}}, "only valid with expire.on=worktree"},
 		{"sensitive on durable", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "durable", Sensitive: true}}}, "sensitive is only valid"},
 		{"sensitive pr-merge", &Manifest{Docs: []Rule{{Path: "a", Visibility: "private", Lifetime: "ephemeral", Sensitive: true, Expire: &Expire{On: "pr-merge"}}}}, "not pr-merge"},
+		{"primary on durable ok", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "durable", Primary: true}}}, ""},
+		{"primary on ephemeral", &Manifest{Docs: []Rule{{Path: "a", Visibility: "public", Lifetime: "ephemeral", Primary: true, Expire: &Expire{On: "pr-merge"}}}}, "primary is only valid on durable"},
 		{"unreachable rule", &Manifest{Docs: []Rule{
 			{Path: "docs/**", Visibility: "public", Lifetime: "durable"},
 			{Path: "docs/strategy/**", Visibility: "private", Lifetime: "durable"},

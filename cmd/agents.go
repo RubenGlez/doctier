@@ -54,7 +54,18 @@ plan read as authoritative is worse than no plan); --all lists every one.`)
 		includeEphemeral = inFlight(m)
 	}
 	durable, ephemeral := classifiedDocs(m, root, files, includeEphemeral)
-	block := renderBlock(durable, ephemeral)
+	// When the manifest marks entry points, the block lists those individually
+	// and summarizes the rest by directory; with no primaries declared the
+	// listing stays exhaustive (backwards compatible).
+	var primary, rest []string
+	for _, f := range durable {
+		if rule, ok := m.Match(f); ok && rule.Primary {
+			primary = append(primary, f)
+		} else {
+			rest = append(rest, f)
+		}
+	}
+	block := renderBlock(primary, rest, ephemeral)
 	if *write {
 		return writeBlock(root, *file, block)
 	}
@@ -133,15 +144,31 @@ func readable(root, f string) bool {
 	return !agex.IsEncrypted(data)
 }
 
-func renderBlock(durable, ephemeral []string) string {
+// renderBlock emits the managed block. With primaries declared, they are the
+// individually listed entry points and the remaining durables collapse into
+// per-directory lines; otherwise every durable doc is listed individually.
+// The grouping works on whatever paths the manifest classified — doctier holds
+// no opinion about any specific docs tree.
+func renderBlock(primary, durable, ephemeral []string) string {
 	var b strings.Builder
 	b.WriteString(agentsBegin + "\n")
 	b.WriteString("## Project context\n\n")
 	b.WriteString("Managed by doctier — do not edit between the markers.\n")
-	if len(durable) > 0 {
-		b.WriteString("\nRead these for project context:\n\n")
-		for _, f := range durable {
+	if len(primary) > 0 {
+		b.WriteString("\nEntry points (read these first):\n\n")
+		for _, f := range primary {
 			b.WriteString("- `" + f + "`\n")
+		}
+	}
+	if len(durable) > 0 {
+		if len(primary) > 0 {
+			b.WriteString("\nFurther docs, by directory:\n\n")
+			b.WriteString(renderDirGroups(durable))
+		} else {
+			b.WriteString("\nRead these for project context:\n\n")
+			for _, f := range durable {
+				b.WriteString("- `" + f + "`\n")
+			}
 		}
 	}
 	if len(ephemeral) > 0 {
@@ -150,10 +177,35 @@ func renderBlock(durable, ephemeral []string) string {
 			b.WriteString("- `" + f + "`\n")
 		}
 	}
-	if len(durable) == 0 && len(ephemeral) == 0 {
+	if len(primary) == 0 && len(durable) == 0 && len(ephemeral) == 0 {
 		b.WriteString("\n_No classified documents yet._\n")
 	}
 	b.WriteString(agentsEnd + "\n")
+	return b.String()
+}
+
+// renderDirGroups collapses doc paths into one line per directory, so a large
+// tree costs a handful of bullets instead of one per file. Repo-root files get
+// their own line.
+func renderDirGroups(files []string) string {
+	counts := map[string]int{}
+	var dirs []string
+	for _, f := range files {
+		dir := filepath.Dir(f)
+		if _, seen := counts[dir]; !seen {
+			dirs = append(dirs, dir)
+		}
+		counts[dir]++
+	}
+	sort.Strings(dirs)
+	var b strings.Builder
+	for _, dir := range dirs {
+		if dir == "." {
+			b.WriteString(fmt.Sprintf("- repo root (%d docs)\n", counts[dir]))
+		} else {
+			b.WriteString(fmt.Sprintf("- `%s/` (%d docs)\n", dir, counts[dir]))
+		}
+	}
 	return b.String()
 }
 

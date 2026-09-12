@@ -135,7 +135,7 @@ func TestWriteBlockIsIdempotent(t *testing.T) {
 	// pre-existing hand-written content must be preserved.
 	os.WriteFile(filepath.Join(root, "AGENTS.md"), []byte("# My project\n\nHand-written notes.\n"), 0o644)
 
-	block := renderBlock([]string{"docs/arch.md"}, []string{"feature.prd.md"})
+	block := renderBlock(nil, []string{"docs/arch.md"}, []string{"feature.prd.md"})
 	if err := writeBlock(root, "AGENTS.md", block); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestWriteBlockIsIdempotent(t *testing.T) {
 	}
 
 	// Re-run with a changed doc set: exactly one managed block, updated content.
-	block2 := renderBlock([]string{"docs/arch.md", "docs/adr.md"}, nil)
+	block2 := renderBlock(nil, []string{"docs/arch.md", "docs/adr.md"}, nil)
 	if err := writeBlock(root, "AGENTS.md", block2); err != nil {
 		t.Fatal(err)
 	}
@@ -161,5 +161,44 @@ func TestWriteBlockIsIdempotent(t *testing.T) {
 	}
 	if !strings.Contains(string(second), "Hand-written notes.") {
 		t.Fatal("existing content must survive re-runs")
+	}
+}
+
+// With primaries declared, the block lists them as entry points and collapses
+// the remaining durables into per-directory lines.
+func TestRenderBlockPrimariesGroupTheRest(t *testing.T) {
+	block := renderBlock(
+		[]string{"guide/architecture.md"},
+		[]string{"guide/features/one.md", "guide/features/two.md", "notes.md"},
+		[]string{"plan.prd.md"},
+	)
+	for _, want := range []string{
+		"Entry points (read these first):",
+		"`guide/architecture.md`",
+		"Further docs, by directory:",
+		"`guide/features/` (2 docs)",
+		"repo root (1 docs)",
+		"In progress (auto-removed when the work completes):",
+	} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("block missing %q:\n%s", want, block)
+		}
+	}
+	// Individual non-primary paths must NOT be listed.
+	if strings.Contains(block, "guide/features/one.md") {
+		t.Fatalf("non-primaries must be grouped, not listed:\n%s", block)
+	}
+}
+
+// No primaries declared: exhaustive listing, exactly as before.
+func TestRenderBlockWithoutPrimariesIsExhaustive(t *testing.T) {
+	block := renderBlock(nil, []string{"docs/arch.md", "secret.md"}, nil)
+	if !strings.Contains(block, "Read these for project context:") ||
+		!strings.Contains(block, "`docs/arch.md`") ||
+		!strings.Contains(block, "`secret.md`") {
+		t.Fatalf("no-primary block must list every durable doc:\n%s", block)
+	}
+	if strings.Contains(block, "Entry points") || strings.Contains(block, "by directory") {
+		t.Fatalf("no-primary block must keep the legacy shape:\n%s", block)
 	}
 }

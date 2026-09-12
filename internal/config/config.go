@@ -36,6 +36,10 @@ type Rule struct {
 	Lifetime   string  `yaml:"lifetime"`   // durable | ephemeral
 	Sensitive  bool    `yaml:"sensitive"`  // ephemeral only: never committed, local to the worktree
 	Expire     *Expire `yaml:"expire"`
+	// Primary marks a durable doc as an entry point for `doctier agents`:
+	// primaries are listed individually in the context block while the rest of
+	// the durable set is summarized by directory. Optional; durable only.
+	Primary bool `yaml:"primary"`
 }
 
 // Expire describes when an ephemeral document is collected.
@@ -180,6 +184,11 @@ func (m *Manifest) validate() error {
 		// silently ignored (the file is always tracked), so reject it loudly.
 		if r.Sensitive && r.Lifetime != "ephemeral" {
 			return fmt.Errorf("docs[%d] (%q): sensitive is only valid on ephemeral rules", i, r.Path)
+		}
+		// A primary entry point must outlive its own work unit: on an ephemeral it
+		// would disappear from the index the moment it is collected, so reject it.
+		if r.Primary && r.Lifetime != "durable" {
+			return fmt.Errorf("docs[%d] (%q): primary is only valid on durable rules", i, r.Path)
 		}
 		// A sensitive file is never committed, so a merge-based trigger can never
 		// collect it; only worktree (dies with the worktree) or ttl (disk sweep).
