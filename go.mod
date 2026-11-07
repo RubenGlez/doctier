@@ -1,12 +1,12 @@
 module github.com/rubenglez/doctier
 
-go 1.25.0
+go 1.26.9
 
 require (
 	filippo.io/age v1.2.1
 	github.com/bmatcuk/doublestar/v4 v4.7.1
-	golang.org/x/crypto v0.52.0
-	golang.org/x/sys v0.45.0
+	golang.org/x/crypto v0.56.0
+	golang.org/x/sys v0.47.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
