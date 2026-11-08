@@ -14,6 +14,7 @@ import (
 // ever creeps in.
 var forbiddenLayoutReferences = []string{
 	".harness/",
+	".rubstack/",
 	"engineering/features/",
 	"engineering/architecture.md",
 	"implementation-plan.md",

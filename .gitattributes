@@ -1,3 +1,6 @@
 # doctier:begin — managed by 'doctier init', do not edit
-.harness/** filter=doctier diff=doctier merge=doctier
+.rubstack/engineering/architecture.md filter=doctier diff=doctier merge=doctier
+.rubstack/product/product.md filter=doctier diff=doctier merge=doctier
+.rubstack/product/roadmap.md filter=doctier diff=doctier merge=doctier
+.rubstack/** filter=doctier diff=doctier merge=doctier
 # doctier:end
