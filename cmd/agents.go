@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -191,7 +192,7 @@ func renderDirGroups(files []string) string {
 	counts := map[string]int{}
 	var dirs []string
 	for _, f := range files {
-		dir := filepath.Dir(f)
+		dir := path.Dir(filepath.ToSlash(f))
 		if _, seen := counts[dir]; !seen {
 			dirs = append(dirs, dir)
 		}
